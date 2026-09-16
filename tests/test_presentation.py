@@ -813,9 +813,10 @@ def test_une_creation_d_annuaire_refusee_remonte_le_refus() -> None:
 
 # --- garde-fous de structure ----------------------------------------------
 #
-# Ces deux tests lisent des fichiers source sans les importer : `fenetre.py` importe
-# `tkinter`, qui peut être absent de la machine. Ils vérifient une propriété que
-# l'exécution ne montrerait qu'en recette, sur un boîtier, un jour de coupure réseau.
+# Ces tests lisent des fichiers source sans les importer : `fenetre.py` importe
+# `tkinter`, qui peut être absent de la machine. Ils vérifient des propriétés que
+# l'exécution ne montrerait qu'en recette, sur un boîtier, un jour de coupure réseau —
+# et les derniers sabotent des sources factices pour prouver qu'ils mordent.
 
 
 def _arbre(module_source: str) -> ast.Module:

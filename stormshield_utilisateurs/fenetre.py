@@ -6,13 +6,20 @@ continue. Tout ce qui se vérifie vit dans `presentation` ; ce qui reste ici —
 disposition, les boîtes de dialogue, l'activation des champs — relève du cahier de
 recette.
 
-Deux règles tiennent ce fichier :
+Quatre règles tiennent ce fichier :
 
 - le fil d'exécution ne touche jamais un widget. Il reçoit un objet figé, publie dans
   une `queue`, et `PompeEvenements` — replanifiée par `after()` — est seule à ramener
-  ces messages dans le fil de l'interface ;
+  ces messages dans le fil de l'interface. Rien de `self` ne lui est passé, cible comme
+  arguments : un test de structure le vérifie sur ce source ;
 - aucun aiguillage sur une chaîne. `_appliquer` filtre sur le type du message, et les
-  exceptions du métier ont été traduites en types par `message_de_fil`.
+  exceptions du métier ont été traduites en types par `message_de_fil` ;
+- rien ne disparaît en silence. Ce que la pompe ou Tk attrape part au journal et dans
+  une boîte de dialogue : il n'y a ni fichier de journal, ni `stderr` dans un
+  exécutable fenêtré ;
+- rien ne détruit un secret sans que l'opérateur l'ait dit. Les mots de passe générés
+  n'existent que dans ce processus : un nouveau lot comme une fermeture de fenêtre
+  demandent confirmation tant qu'ils n'ont pas été écrits.
 """
 
 import queue
