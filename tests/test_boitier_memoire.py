@@ -2,7 +2,7 @@
 
 import pytest
 
-from stormshield_utilisateurs.boitier import ErreurCommande, ErreurReseau
+from stormshield_utilisateurs.boitier import Boitier, ErreurCommande, ErreurReseau
 from stormshield_utilisateurs.boitier_memoire import BoitierMemoire
 
 
@@ -62,3 +62,18 @@ def test_initialisation_puis_activation_d_un_annuaire() -> None:
     boitier.initialiser_annuaire("neuf.local", "Societe", "dc=neuf,dc=local", "secret-factice")
     boitier.activer_annuaire()
     assert boitier.lister_annuaires() == ["neuf.local"]
+
+
+def test_boitier_memoire_respecte_le_protocole_boitier_et_produit_un_effet_reel() -> None:
+    """Preuve statique : l'annotation `Boitier` force mypy à comparer structurellement
+    `BoitierMemoire` au Protocol - une méthode manquante ou de signature modifiée fait
+    échouer la vérification de types. Preuve comportementale : les appels passés à
+    travers cette variable typée `Boitier` produisent un effet observable réel."""
+    boitier: Boitier = BoitierMemoire()
+    boitier.connecter()
+    boitier.creer_groupe("compta")
+    boitier.creer_utilisateur("dupont", "Dupont", "Marie", "interne.local")
+    boitier.ajouter_membre("compta", "dupont")
+    boitier.deconnecter()
+    assert boitier.lister_utilisateurs() == ["dupont"]
+    assert boitier.lister_groupes() == ["compta"]
