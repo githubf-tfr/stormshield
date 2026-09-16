@@ -23,8 +23,8 @@ ci-dessous est formulé pour se trancher sans interprétation.
 ## Comment s'en servir
 
 - **Boîtier : non** — se joue sur un poste Windows seul. 21 cas.
-- **Boîtier : oui** — exige un SNS de maquette joignable. 88 cas.
-- **109 cas au total.**
+- **Boîtier : oui** — exige un SNS de maquette joignable. 89 cas.
+- **110 cas au total.**
 
 Jouer d'abord les cas sans boîtier (sections B à D), puis les sections E et suivantes.
 Consigner le verdict de chaque cas : **OK**, **KO** ou **NJ** (non joué, avec le motif).
@@ -57,6 +57,7 @@ boîtier au premier passage.
 | `lot-groupe-espace.csv` | deux comptes valides, groupe `compta bis recette` |
 | `lot-groupe-retour-ligne.csv` | un compte valide, groupe contenant un saut de ligne (champ entre guillemets CSV, `compta\nbis`) |
 | `lot-nom-compose.csv` | une ligne `p.delatour;De La Tour;Pierre;` |
+| `lot-nom-guillemet.csv` | trois lignes valides, dont `d.oconnor;O"Connor;Diane;` — le guillemet double est dans le **nom**, pas dans un groupe |
 | `lot-200.csv` | 200 comptes neufs, chacun rattaché à un groupe parmi trois |
 
 ---
@@ -1201,6 +1202,26 @@ instrumenté).
 
 ---
 
+# P. Compléments de la revue finale
+
+Cas ajoutés après la revue finale de branche. Numérotés à la suite pour ne pas décaler la
+numérotation à laquelle la traçabilité renvoie.
+
+**110 — Nom de personne contenant un guillemet double** · boîtier : oui
+*Objectif* : le nom et le prénom sont cités exactement comme un nom de groupe, et le
+guillemet n'y est pas davantage échappé. Le cas 59 ne mesure que les groupes ; rien ne
+prouvait que le comportement était le même sur un patronyme, qui est pourtant le champ le
+plus susceptible d'en porter un.
+*Départ* : `lot-nom-guillemet.csv`, comptes absents du boîtier.
+*Actions* : lancer un lot réel, relire les comptes du boîtier.
+*Attendu* : la ligne **n'est pas rejetée à la lecture** (seul l'identifiant est contraint).
+`USER CREATE` est refusé par le boîtier, le journal porte « d.oconnor : échec de création
+(…) » et le rapport l'inscrit sous `USER CREATE`. Les deux comptes encadrants sont créés. La
+seule issue inacceptable est un compte créé sous un **nom tronqué**, silencieusement.
+*Verdict* : OK / KO —
+
+---
+
 # Récapitulatif
 
 | Section | Cas | Boîtier requis |
@@ -1222,10 +1243,11 @@ instrumenté).
 | N — Certificat | 103 | **oui** |
 | N — Certificat | 104 | non |
 | O — Volume et robustesse | 105 – 109 | **oui** |
+| P — Compléments de la revue finale | 110 | **oui** |
 
 **21 cas sans boîtier** : 1 à 18, 79, 87 et 104. Ils se jouent dès qu'un poste Windows et le
 `.exe` sont disponibles, sans attendre la maquette.
-**88 cas exigeant un boîtier** : tous les autres. **109 cas au total.**
+**89 cas exigeant un boîtier** : tous les autres. **110 cas au total.**
 
 ## Traçabilité
 
