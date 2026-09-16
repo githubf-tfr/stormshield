@@ -1072,6 +1072,20 @@ def test_le_module_de_presentation_n_importe_pas_tkinter() -> None:
     assert [nom for nom in importes if nom.partition(".")[0] == "tkinter"] == []
 
 
+def test_le_module_de_presentation_n_importe_pas_le_sdk_au_niveau_module() -> None:
+    """`boitier_sdk` tire le SDK Stormshield puis `requests` : ce module « sans le
+    moindre widget » ne doit pas les charger pour être importé. L'import vit dans la
+    seule fabrique qui s'en sert."""
+    arbre = _arbre(presentation.__file__)
+    importes: list[str] = []
+    for noeud in arbre.body:
+        if isinstance(noeud, ast.Import):
+            importes.extend(alias.name for alias in noeud.names)
+        elif isinstance(noeud, ast.ImportFrom) and noeud.module is not None:
+            importes.append(noeud.module)
+    assert "stormshield_utilisateurs.boitier_sdk" not in importes
+
+
 def _venus_de_presentation(arbre: ast.Module) -> set[str]:
     return {
         alias.asname or alias.name

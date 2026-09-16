@@ -19,7 +19,6 @@ from queue import Empty, Queue
 
 from stormshield_utilisateurs import motdepasse
 from stormshield_utilisateurs.boitier import Boitier, ErreurBoitier
-from stormshield_utilisateurs.boitier_sdk import BoitierSDK
 from stormshield_utilisateurs.execution import (
     AnnuaireAbsent,
     AnnuaireDejaPresent,
@@ -697,7 +696,15 @@ def ligne_d_enregistrement(comptes: Sequence[CompteCree], chemin: str) -> str:
 
 
 def boitier_de_la_connexion(connexion: Connexion) -> Boitier:
-    """Fabrique de production. Injectée dans les tests pour rester hors réseau."""
+    """Fabrique de production. Injectée dans les tests pour rester hors réseau.
+
+    L'import est différé : ce module n'a pas le moindre widget et pas la moindre
+    dépendance réseau, et `boitier_sdk` tire le SDK Stormshield puis `requests`. Les
+    tests, la fenêtre au démarrage et tout ce qui ne se connecte à rien n'ont pas à
+    payer ce chargement, ni à échouer s'il manque.
+    """
+    from stormshield_utilisateurs.boitier_sdk import BoitierSDK
+
     return BoitierSDK(
         hote=connexion.hote,
         utilisateur=connexion.compte,
