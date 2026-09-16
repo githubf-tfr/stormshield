@@ -23,8 +23,8 @@ ci-dessous est formulé pour se trancher sans interprétation.
 ## Comment s'en servir
 
 - **Boîtier : non** — se joue sur un poste Windows seul. 21 cas.
-- **Boîtier : oui** — exige un SNS de maquette joignable. 89 cas.
-- **110 cas au total.**
+- **Boîtier : oui** — exige un SNS de maquette joignable. 91 cas.
+- **112 cas au total.**
 
 Jouer d'abord les cas sans boîtier (sections B à D), puis les sections E et suivantes.
 Consigner le verdict de chaque cas : **OK**, **KO** ou **NJ** (non joué, avec le motif).
@@ -1220,6 +1220,32 @@ plus susceptible d'en porter un.
 seule issue inacceptable est un compte créé sous un **nom tronqué**, silencieusement.
 *Verdict* : OK / KO —
 
+**111 — Un lot réel demande confirmation avant d'écrire** · boîtier : oui
+*Objectif* : le produit demandait confirmation pour perdre des mots de passe et pas pour
+écrire sur un firewall. La confirmation est le garde-fou qui remplace le détour par la
+simulation, retiré avec la vague précédente.
+*Départ* : `lot-groupe-un-membre.csv`, compte et groupe `solo-recette` absents du boîtier.
+*Actions* : renseigner l'hôte et les identifiants, **décocher Simulation dès le premier
+lancement**, cliquer sur *Lancer*.
+*Attendu* : le plan s'affiche au journal, **puis** une boîte « Écrire sur le firewall »
+s'ouvre avant toute écriture. Elle nomme l'hôte visé, annonce « 1 compte à créer, 1 groupe
+neuf », liste « Groupes à créer : solo-recette (1 membre) » et **signale qu'un groupe neuf
+n'aurait qu'un seul membre**. Le bouton par défaut est *Non*. Après *Oui*, le lot se
+déroule normalement et le compte existe sur le boîtier.
+*Verdict* : OK / KO —
+
+**112 — Renoncer à la confirmation n'écrit rien** · boîtier : oui
+*Objectif* : l'opérateur doit pouvoir renoncer, et le renoncement doit être total.
+*Départ* : cas 111 rejoué sur un boîtier où le compte et le groupe n'existent pas ; relever
+la liste des comptes et des groupes avant.
+*Actions* : au clic sur *Lancer* (Simulation décochée), répondre **Non** à la boîte « Écrire
+sur le firewall ».
+*Attendu* : le journal porte « lot abandonné à la confirmation : aucune écriture n'a été
+tentée … », le bilan annonce « 0 compte créé, 0 groupe créé », le bouton *Lancer* redevient
+actif, et le boîtier relu est **strictement identique** à son état de départ — aucun compte,
+aucun groupe créé.
+*Verdict* : OK / KO —
+
 ---
 
 # Récapitulatif
@@ -1243,11 +1269,11 @@ seule issue inacceptable est un compte créé sous un **nom tronqué**, silencie
 | N — Certificat | 103 | **oui** |
 | N — Certificat | 104 | non |
 | O — Volume et robustesse | 105 – 109 | **oui** |
-| P — Compléments de la revue finale | 110 | **oui** |
+| P — Compléments de la revue finale | 110 – 112 | **oui** |
 
 **21 cas sans boîtier** : 1 à 18, 79, 87 et 104. Ils se jouent dès qu'un poste Windows et le
 `.exe` sont disponibles, sans attendre la maquette.
-**89 cas exigeant un boîtier** : tous les autres. **110 cas au total.**
+**91 cas exigeant un boîtier** : tous les autres. **112 cas au total.**
 
 ## Traçabilité
 
@@ -1300,7 +1326,9 @@ repris** :
 1. **« Lancer avec Simulation décochée avant toute connexion → refus demandant de simuler
    d'abord »** (point 8 de la première liste). L'obstacle a été retiré : un premier lot part
    directement en réel, et c'est le boîtier qui arbitre. Remplacé par les cas **55** (le lot
-   part) et **46** (le boîtier refuse la politique).
+   part) et **46** (le boîtier refuse la politique) — et, depuis la revue finale, par la
+   confirmation explicite des cas **111** et **112**, qui rétablit le garde-fou sans
+   rétablir le détour.
 2. **« Les deux arrêts ne se distinguent que dans le journal »** (point 29 de la première
    liste). `Rapport.motif_arret` porte désormais la distinction : le rapport lui-même dit
    quelle conduite tenir. Devenu le cas **86**.
