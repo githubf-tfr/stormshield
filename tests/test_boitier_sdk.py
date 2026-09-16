@@ -16,6 +16,7 @@ from stormshield.sns.sslclient import (
 
 from stormshield_utilisateurs.boitier import Boitier, ErreurCommande, ErreurFatale, ErreurReseau
 from stormshield_utilisateurs.boitier_sdk import (
+    DELAI_ATTENTE_PAR_DEFAUT,
     BoitierSDK,
     _lignes,
     _sans_secret,
@@ -281,12 +282,82 @@ HOTE_INEXISTANT = "boitier.invalid"
 SANS_IDENTITE = ""
 
 
+class _FabriqueCapturante:
+    """Fabrique injectée qui retient les mots-clés reçus par le constructeur du SDK.
+
+    Une fabrique `lambda **_: client` les avalait tous sans en vérifier aucun : câbler
+    `sslverifypeer=False, sslverifyhost=False` en dur dans l'adaptateur, ou supprimer le
+    `timeout`, laissait toute la suite verte. Le seul contrôle de sécurité de bout en
+    bout du produit n'avait alors aucune preuve automatisée.
+    """
+
+    def __init__(self, client: _ClientFactice | None = None) -> None:
+        self.client = client if client is not None else _ClientFactice()
+        self.mots_cles: dict[str, Any] = {}
+
+    def __call__(self, **mots_cles: Any) -> Any:
+        self.mots_cles = mots_cles
+        return self.client
+
+
 def _adaptateur(client: _ClientFactice) -> BoitierSDK:
     boitier = BoitierSDK(
-        HOTE_INEXISTANT, SANS_IDENTITE, SANS_IDENTITE, fabrique_client=lambda **_: client
+        HOTE_INEXISTANT, SANS_IDENTITE, SANS_IDENTITE, fabrique_client=_FabriqueCapturante(client)
     )
     boitier.connecter()
     return boitier
+
+
+@pytest.mark.parametrize("verifier", [True, False])
+def test_la_case_de_verification_du_certificat_atteint_le_constructeur_du_sdk(
+    verifier: bool,
+) -> None:
+    """Le contournement n'est jamais câblé en dur : il vient de la case décochée par
+    l'opérateur, et les deux options du SDK doivent porter son choix — dans les deux
+    états de la case, sans quoi un « toujours faux » passerait aussi bien qu'un
+    « toujours vrai »."""
+    fabrique = _FabriqueCapturante()
+    boitier = BoitierSDK(
+        HOTE_INEXISTANT,
+        SANS_IDENTITE,
+        SANS_IDENTITE,
+        verifier_certificat=verifier,
+        fabrique_client=fabrique,
+    )
+    boitier.connecter()
+    assert fabrique.mots_cles["sslverifypeer"] is verifier
+    assert fabrique.mots_cles["sslverifyhost"] is verifier
+    assert fabrique.mots_cles["host"] == HOTE_INEXISTANT
+
+
+def test_la_verification_du_certificat_est_active_sans_rien_demander() -> None:
+    """Le défaut est la vérification : un oubli d'argument ne doit pas ouvrir la session
+    à une interception."""
+    fabrique = _FabriqueCapturante()
+    BoitierSDK(
+        HOTE_INEXISTANT, SANS_IDENTITE, SANS_IDENTITE, fabrique_client=fabrique
+    ).connecter()
+    assert fabrique.mots_cles["sslverifypeer"] is True
+    assert fabrique.mots_cles["sslverifyhost"] is True
+
+
+def test_le_delai_d_attente_atteint_le_constructeur_du_sdk() -> None:
+    """Le SDK laisse `timeout=None` par défaut, c'est-à-dire l'attente indéfinie : un
+    boîtier qui cesse de répondre figerait l'outil sans signal ni journal."""
+    fabrique = _FabriqueCapturante()
+    BoitierSDK(
+        HOTE_INEXISTANT, SANS_IDENTITE, SANS_IDENTITE, fabrique_client=fabrique
+    ).connecter()
+    assert fabrique.mots_cles["timeout"] == DELAI_ATTENTE_PAR_DEFAUT
+    choisi = _FabriqueCapturante()
+    BoitierSDK(
+        HOTE_INEXISTANT,
+        SANS_IDENTITE,
+        SANS_IDENTITE,
+        delai_attente=7.5,
+        fabrique_client=choisi,
+    ).connecter()
+    assert choisi.mots_cles["timeout"] == 7.5
 
 
 @pytest.mark.parametrize(
