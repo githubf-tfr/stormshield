@@ -845,6 +845,24 @@ def test_le_fil_n_ecrit_qu_une_fois_l_autorisation_donnee() -> None:
     assert boitier.utilisateurs == ["dupont"]
 
 
+def test_travailler_transmet_les_rejets_a_executer() -> None:
+    """`test_un_compte_dont_la_ligne_a_ete_rejetee_n_est_pas_orphelin` (test_plan.py) ne
+    prouve le câblage des rejets qu'en isolation, sur `plan.construire` directement.
+    `travailler` doit porter ce même paramètre jusqu'à `executer`, sans quoi un compte du
+    boîtier dont la ligne a été rejetée serait annoncé orphelin à tort."""
+    boitier = BoitierMemoire(utilisateurs=["martin"])
+    messages, publier = collecter()
+    travailler(
+        parametres(),
+        [utilisateur("dupont")],
+        publier,
+        rejets=[Rejet(ligne=3, identifiant="martin", motif="prenom vide")],
+        fabriquer_boitier=lambda _: boitier,
+    )
+    plans = [message for message in messages if isinstance(message, PlanPret)]
+    assert plans[0].plan.orphelins == ()
+
+
 def test_le_rapport_resume_puis_detaille_les_echecs() -> None:
     rapport = Rapport(
         comptes_crees=[CompteCree("dupont", "s3cr3t")],

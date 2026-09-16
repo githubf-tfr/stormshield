@@ -1,6 +1,6 @@
 """Exécution : on observe l'état final du double et les événements émis."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from stormshield_utilisateurs import motdepasse
 from stormshield_utilisateurs.boitier import ErreurCommande, ErreurFatale, ErreurReseau
@@ -23,6 +23,7 @@ from stormshield_utilisateurs.modele import (
     PlancherPolitique,
     PolitiqueMotDePasse,
     Rapport,
+    Rejet,
     Utilisateur,
 )
 
@@ -51,6 +52,7 @@ def _lancer(
     utilisateurs: list[Utilisateur],
     *,
     simulation: bool = False,
+    rejets: Sequence[Rejet] = (),
     generer: Callable[[PolitiqueMotDePasse], str] = lambda _politique: "MotDePasse1!",
     confirmer: Callable[[Plan], bool] = lambda _plan: True,
 ) -> tuple[Rapport, list[Evenement]]:
@@ -62,6 +64,7 @@ def _lancer(
         simulation=simulation,
         emettre=evenements.append,
         confirmer=confirmer,
+        rejets=rejets,
         patience=PATIENCE,
         generer_mot_de_passe=generer,
     )
@@ -328,6 +331,45 @@ def test_reconnexion_reconstruit_le_plan_au_lieu_de_rejouer() -> None:
     # La barre reste cohérente : le total suit le plan reconstruit.
     derniere = _progressions(evenements)[-1]
     assert derniere.accomplies == derniere.total
+
+
+def test_executer_transmet_les_rejets_a_la_construction_du_plan() -> None:
+    """`test_un_compte_dont_la_ligne_a_ete_rejetee_n_est_pas_orphelin` (test_plan.py) ne
+    prouve le câblage des rejets qu'en isolation, sur `plan.construire` directement.
+    `executer` doit porter ce même paramètre à son premier appel, sans quoi un compte du
+    boîtier dont la ligne a été rejetée serait annoncé orphelin à tort."""
+    boitier = BoitierMemoire(utilisateurs=["martin"])
+    _, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont")],
+        rejets=[Rejet(ligne=3, identifiant="martin", motif="prenom vide")],
+    )
+    plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
+    assert plans[0].plan.orphelins == ()
+
+
+def test_la_reconstruction_du_plan_apres_reconnexion_transmet_aussi_les_rejets() -> None:
+    """Même preuve que ci-dessus, mais sur le second appel à `construire` — celui de
+    `_replanifier`, atteint après une reconnexion, jamais exercé par le test précédent."""
+    boitier = BoitierMemoire(utilisateurs=["martin"])
+    coupures = 0
+
+    def couper_apres_le_premier(operation: str, cible: str) -> None:
+        nonlocal coupures
+        if operation == "creer_utilisateur" and cible == "legrand" and coupures == 0:
+            coupures += 1
+            boitier.utilisateurs.append("legrand")
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_apres_le_premier
+    _, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont"), _utilisateur("legrand", ligne=3)],
+        rejets=[Rejet(ligne=4, identifiant="martin", motif="prenom vide")],
+    )
+    plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
+    assert len(plans) == 2  # le plan reconstruit après la coupure, pas le premier
+    assert plans[-1].plan.orphelins == ()
 
 
 def test_coupure_entre_la_creation_et_le_mot_de_passe_laisse_une_trace() -> None:
