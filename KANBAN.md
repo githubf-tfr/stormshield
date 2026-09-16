@@ -32,6 +32,12 @@ Tenu à la main.
 
 ## À faire
 
+- **Trancher l'annulation d'un lot en cours.** Deux cents comptes font plusieurs minutes
+  d'écritures ; l'opérateur qui s'aperçoit qu'il a visé le mauvais boîtier n'a aucune
+  sortie. La seule issue est de fermer la fenêtre, ce qui tue le fil où qu'il en soit — y
+  compris entre la création d'un compte et la pose de son mot de passe, laissant un compte
+  inutilisable qu'aucun relancement ne répare. Non implémenté délibérément : la spec
+  validée n'en parle pas.
 - **Exécuter `docs/recette/2026-09-16-cahier-recette-v1.md` dès qu'un boîtier est
   joignable.** 112 cas, dont 21 jouables sans boîtier sur un poste Windows et le `.exe` de
   la release. C'est la seule couverture de `fenetre.py` et le seul moyen de confirmer les
@@ -94,6 +100,30 @@ Modules livrés, du plus pur au plus impur :
 - `README.md` refondu pour l'opérateur : format du CSV, simulation, mots de passe,
   certificat, et l'avertissement SmartScreen que le binaire non signé provoque.
 - Cahier de recette écrit : `docs/recette/2026-09-16-cahier-recette-v1.md`.
+
+### Revue finale de branche (2026-09-16)
+
+Revue finale de `feat/injection-utilisateurs` avant fusion : verdict favorable sous
+réserve de quatre points, tous traités dans la foulée — une garantie de test manquante,
+deux trous de couverture mineurs, deux oublis de documentation.
+
+Le plus sérieux des quinze commits de cette vague est un correctif `Critique` :
+`dict(ligne)` convertissait chaque ligne rendue par serverd en dictionnaire nu, effaçant
+l'insensibilité à la casse que le SDK construit lui-même dans ses `dict` de section — il
+fallait envelopper chaque ligne dans une `CaseInsensitiveDict`, pas seulement s'abstenir
+de la convertir en `dict` nu. Une étiquette `Domain` là où l'outil lit `domain` rendait
+`lister_annuaires()` vide, boîtier vu comme vierge : les deux gardes qui protègent
+`CONFIG LDAP INITIALIZE` — la seule commande du produit qui écrase une base LDAP
+existante — tombaient ensemble sur une clé dont personne ne connaît la casse réelle.
+
+Une boîte de confirmation nomme désormais l'hôte visé, le nombre de comptes à créer et
+les groupes neufs avant tout lot réel : elle rétablit l'intention de la spec — le
+garde-fou contre un groupe fantôme, lu avant que la décision d'écrire ne soit prise —
+après que le passage obligé par la simulation, qui portait seul ce rôle, a été retiré.
+
+Une seule coupure réseau, survenant avant la toute première écriture du lot, avortait le
+lot entier : le garde anti-boucle comparait le plan restant à celui d'avant la coupure, et
+« aucun progrès » y est l'état normal tant qu'aucune écriture n'a encore abouti.
 
 ### Amorçage (2026-09-16)
 
