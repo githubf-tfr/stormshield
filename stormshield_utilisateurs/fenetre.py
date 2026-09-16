@@ -42,6 +42,7 @@ from stormshield_utilisateurs.modele import (
     Utilisateur,
 )
 from stormshield_utilisateurs.presentation import (
+    FERMETURE_PENDANT_CREATION,
     POLITIQUE_INITIALE,
     AnnuaireCree,
     AnnuaireManquant,
@@ -53,6 +54,7 @@ from stormshield_utilisateurs.presentation import (
     ParametresAnnuaire,
     PompeEvenements,
     Publieur,
+    avertissement_de_fermeture,
     avertissement_perte_de_secrets,
     libelle_plancher,
     ligne_d_enregistrement,
@@ -537,10 +539,33 @@ class Fenetre:
         bouton = ttk.Button(cadre, text="Créer l'annuaire")
         bouton.grid(row=6, column=0, sticky="w", padx=6, pady=3)
 
+        # Vrai entre le démarrage du fil de création et son message terminal. La pompe
+        # est planifiée sur la fenêtre principale : elle survit au dialogue et
+        # délivrerait ses messages à des widgets détruits.
+        creation_en_cours = False
+
+        def oublier_les_saisies() -> None:
+            """Le secret de cn=StormshieldAdmin ne survit pas au dialogue : sans cela il
+            resterait dans l'interpréteur Tcl tout le reste de la session."""
+            for variable in (var_domainname, var_organisation, var_dc, var_secret):
+                variable.set("")
+
+        def fermer() -> None:
+            if creation_en_cours:
+                messagebox.showwarning(
+                    "Création en cours", FERMETURE_PENDANT_CREATION, parent=dialogue
+                )
+                return
+            oublier_les_saisies()
+            dialogue.destroy()
+
         def appliquer(message: MessageFil) -> None:
+            nonlocal creation_en_cours
             match message:
                 case AnnuaireCree(domaine):
+                    creation_en_cours = False
                     self._ecrire(f"annuaire {domaine} créé et activé")
+                    oublier_les_saisies()
                     dialogue.destroy()
                     messagebox.showinfo(
                         "Annuaire créé",
@@ -550,14 +575,20 @@ class Fenetre:
                 case Journal(texte):
                     self._ecrire(texte)
                 case Echoue(texte):
+                    creation_en_cours = False
                     self._ecrire(texte)
-                    bouton.configure(state=tk.NORMAL)
-                    messagebox.showerror("Création refusée", texte, parent=dialogue)
+                    # Le dialogue peut avoir disparu : le refus se dit alors sur la
+                    # fenêtre principale, il ne doit pas se perdre.
+                    if dialogue.winfo_exists():
+                        bouton.configure(state=tk.NORMAL)
+                        messagebox.showerror("Création refusée", texte, parent=dialogue)
+                    else:
+                        messagebox.showerror("Création refusée", texte, parent=self.racine)
                 case _:
-                    # `travailler_annuaire` n'émet rien d'autre.
-                    pass
+                    self._ecrire(ligne_de_message_inconnu(message))
 
         def creer() -> None:
+            nonlocal creation_en_cours
             annuaire = ParametresAnnuaire(
                 domainname=var_domainname.get().strip(),
                 organisation=var_organisation.get().strip(),
@@ -586,18 +617,47 @@ class Fenetre:
             # jusqu'au fil, pas même le temps d'un appel.
             session = self._connexion_des_champs()
             file: queue.Queue[MessageFil] = queue.Queue()
+            creation_en_cours = True
             threading.Thread(
                 target=travailler_annuaire,
                 args=(session, annuaire, file.put),
                 daemon=True,
             ).start()
+            # Le secret est parti avec `annuaire` : il n'a plus rien à faire dans Tcl.
+            var_secret.set("")
             self._pomper(file, appliquer)
 
         bouton.configure(command=creer)
+        # Sans cette interception, fermer le dialogue pendant la création laissait la
+        # pompe délivrer ses messages à des widgets détruits.
+        dialogue.protocol("WM_DELETE_WINDOW", fermer)
         dialogue.transient(self.racine)
         dialogue.grab_set()
 
+    # --- fermeture -------------------------------------------------------
+
+    def _a_la_fermeture(self) -> None:
+        """Le fil est un démon : il meurt avec l'interpréteur, où qu'il en soit.
+
+        Sans cette interception, la boucle rendait la main sans un mot et les mots de
+        passe déjà générés partaient avec le processus.
+        """
+        avertissement = avertissement_de_fermeture(
+            lot_en_cours=self.lot_en_cours,
+            secrets_en_attente=self.enregistrables.secrets_en_attente,
+        )
+        if avertissement is not None and not messagebox.askyesno(
+            "Fermer la fenêtre",
+            avertissement,
+            icon=messagebox.WARNING,
+            default=messagebox.NO,
+            parent=self.racine,
+        ):
+            return
+        self.racine.destroy()
+
     def lancer(self) -> None:
+        self.racine.protocol("WM_DELETE_WINDOW", self._a_la_fermeture)
         self.racine.mainloop()
 
 

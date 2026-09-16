@@ -368,6 +368,13 @@ class ComptesEnregistrables:
         self._deja_ecrits = 0
 
 
+def _secrets_en_souffrance(nombre: int) -> str:
+    """« N mots de passe n'ont pas été enregistrés », accordé au nombre."""
+    sujet = _accord(nombre, "mot de passe", "mots de passe")
+    verbe = "n'a pas été enregistré" if nombre <= 1 else "n'ont pas été enregistrés"
+    return f"{sujet} {verbe}"
+
+
 def avertissement_perte_de_secrets(nombre: int) -> str:
     """Ce que l'opérateur doit lire avant qu'un nouveau lot efface des secrets.
 
@@ -375,10 +382,8 @@ def avertissement_perte_de_secrets(nombre: int) -> str:
     plan suivant les classera « déjà présent, ignoré » et ils resteront sans mot de
     passe connu.
     """
-    sujet = _accord(nombre, "mot de passe", "mots de passe")
-    verbe = "n'a pas été enregistré" if nombre <= 1 else "n'ont pas été enregistrés"
     return (
-        f"{sujet} {verbe} dans un fichier.\n\n"
+        f"{_secrets_en_souffrance(nombre)} dans un fichier.\n\n"
         "Lancer un nouveau lot les efface définitivement. Les comptes, eux, restent "
         "créés sur le firewall : aucun relancement ne leur redonnera de mot de passe, "
         "ils seront classés « déjà présent, ignoré ».\n\n"
@@ -444,6 +449,38 @@ def lignes_du_rapport(rapport: Rapport) -> list[str]:
         lignes.append("Comptes créés sans mot de passe — à reprendre")
         lignes.extend(compte.identifiant for compte in sans_secret)
     return lignes
+
+
+FERMETURE_PENDANT_CREATION = (
+    "La création de l'annuaire est en cours et ne peut pas être annulée : "
+    "CONFIG LDAP INITIALIZE est déjà parti sur le boîtier. Attendez son verdict."
+)
+
+
+def avertissement_de_fermeture(*, lot_en_cours: bool, secrets_en_attente: int) -> str | None:
+    """Ce que fermer la fenêtre ferait perdre. None = il n'y a rien à perdre.
+
+    Le fil est un démon : il meurt avec l'interpréteur, où qu'il en soit — y compris
+    entre la création d'un compte et la pose de son mot de passe.
+    """
+    if not lot_en_cours and not secrets_en_attente:
+        return None
+    parties: list[str] = []
+    if lot_en_cours:
+        parties.append(
+            "Un lot est en cours sur le firewall. Fermer maintenant coupe le travail "
+            "où qu'il en soit, y compris entre la création d'un compte et la pose de "
+            "son mot de passe : ce compte resterait créé, sans mot de passe utilisable."
+        )
+    if secrets_en_attente:
+        disparition = "disparaîtra" if secrets_en_attente <= 1 else "disparaîtront"
+        parties.append(
+            f"{_secrets_en_souffrance(secrets_en_attente)} dans un fichier et "
+            f"{disparition} avec la fenêtre. Les comptes, eux, resteront créés sur "
+            "le firewall."
+        )
+    parties.append("Fermer quand même ?")
+    return "\n\n".join(parties)
 
 
 def ligne_d_enregistrement(comptes: Sequence[CompteCree], chemin: str) -> str:

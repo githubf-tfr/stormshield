@@ -51,6 +51,7 @@ from stormshield_utilisateurs.presentation import (
     ParametresAnnuaire,
     PompeEvenements,
     Publieur,
+    avertissement_de_fermeture,
     avertissement_perte_de_secrets,
     est_terminal,
     libelle_plancher,
@@ -451,6 +452,35 @@ def test_l_avertissement_de_perte_dit_le_nombre_et_l_irreversible() -> None:
 
 def test_l_avertissement_de_perte_s_accorde_au_singulier() -> None:
     assert "1 mot de passe n'a pas" in avertissement_perte_de_secrets(1)
+
+
+def test_rien_a_perdre_ne_pose_aucune_question_a_la_fermeture() -> None:
+    """None = la fenêtre se ferme sans rien demander."""
+    assert avertissement_de_fermeture(lot_en_cours=False, secrets_en_attente=0) is None
+
+
+def test_fermer_en_plein_lot_dit_ce_que_le_fil_perd() -> None:
+    """Le fil est tué où qu'il en soit, y compris entre un USER CREATE et son
+    USER PASSWORD."""
+    texte = avertissement_de_fermeture(lot_en_cours=True, secrets_en_attente=0)
+    assert texte is not None
+    assert "en cours" in texte
+    assert "mot de passe" in texte
+    assert texte.endswith("Fermer quand même ?")
+
+
+def test_fermer_sur_des_secrets_non_enregistres_dit_leur_nombre() -> None:
+    texte = avertissement_de_fermeture(lot_en_cours=False, secrets_en_attente=200)
+    assert texte is not None
+    assert "200 mots de passe" in texte
+    assert "en cours" not in texte
+
+
+def test_fermer_en_plein_lot_avec_des_secrets_dit_les_deux() -> None:
+    texte = avertissement_de_fermeture(lot_en_cours=True, secrets_en_attente=3)
+    assert texte is not None
+    assert "en cours" in texte
+    assert "3 mots de passe" in texte
 
 
 def test_l_enregistrement_compte_a_part_les_comptes_sans_mot_de_passe() -> None:
