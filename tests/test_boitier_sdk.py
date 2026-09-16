@@ -312,6 +312,20 @@ def test_le_boitier_refusant_une_commande_leve_erreur_commande() -> None:
     assert (capture.value.code, capture.value.message) == (200, "Object not found")
 
 
+def test_le_refus_du_boitier_ne_recopie_aucun_secret() -> None:
+    """Le message du boîtier est repris tel quel dans `ErreurCommande`, et ce texte va
+    désormais au journal de la fenêtre et dans une boîte de dialogue : un `CONFIG LDAP
+    INITIALIZE` refusé peut y renvoyer la commande, mot de passe compris."""
+    reponse = _reponse_section_line(
+        "Result", [], ret=200, msg="Bad argument: password=SECRET-42"
+    )
+    boitier = _adaptateur(_ClientFactice(reponse=reponse))
+    with pytest.raises(ErreurCommande) as capture:
+        boitier.lister_utilisateurs()
+    assert "SECRET-42" not in capture.value.message
+    assert "password=***" in capture.value.message
+
+
 def test_reconnecter_ferme_la_session_precedente() -> None:
     """Sans cela chaque reconnexion laissait une session ouverte sur le boîtier, jusqu'à
     la limite d'authentification."""

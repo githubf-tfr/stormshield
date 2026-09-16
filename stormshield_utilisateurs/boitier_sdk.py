@@ -307,7 +307,10 @@ class BoitierSDK:
         # Response.__bool__ est vrai lorsque 100 <= ret < 200 : au-delà, le boîtier a
         # refusé la commande (échec isolé), la liaison elle-même reste valide.
         if not reponse:
-            raise ErreurCommande(int(reponse.ret), str(reponse.msg))
+            # Le message du boîtier peut renvoyer la commande refusée, donc le mot de
+            # passe qu'elle portait : il part au journal de la fenêtre et dans une boîte
+            # de dialogue, et passe donc par le masquage comme tout le reste.
+            raise ErreurCommande(int(reponse.ret), _sans_secret(str(reponse.msg)))
         return reponse
 
     def lister_annuaires(self) -> list[str]:

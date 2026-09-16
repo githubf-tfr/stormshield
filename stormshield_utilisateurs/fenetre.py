@@ -111,10 +111,14 @@ class _Racine(tk.Tk):
 
     def report_callback_exception(
         self,
-        exc: type[BaseException],  # noqa: ARG002 - signature imposée par Tk
+        exc: type[BaseException],
         val: BaseException,
-        tb: TracebackType | None,  # noqa: ARG002 - la trace est déjà dans `val`
+        tb: TracebackType | None,
     ) -> None:
+        # Signature imposée par Tk : le type et la trace sont déjà portés par `val`.
+        # `del` plutôt qu'une suppression d'avertissement en commentaire : ce dépôt
+        # n'en accepte aucune, et celle-ci n'aurait pas été d'une autre famille.
+        del exc, tb
         self._signaler(val)
 
 
@@ -624,6 +628,10 @@ class Fenetre:
                     else:
                         messagebox.showerror("Création refusée", texte, parent=self.racine)
                 case _:
+                    # Remis à faux ici aussi : un message terminal inconnu tomberait
+                    # dans cette branche, la pompe s'arrêterait, et le dialogue comme
+                    # la fenêtre principale resteraient verrouillés pour toujours.
+                    self.creation_annuaire_en_cours = False
                     self._ecrire(ligne_de_message_inconnu(message))
 
         def creer() -> None:

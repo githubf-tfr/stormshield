@@ -55,7 +55,6 @@ from stormshield_utilisateurs.presentation import (
     Publieur,
     avertissement_de_fermeture,
     avertissement_perte_de_secrets,
-    est_terminal,
     libelle_plancher,
     ligne_d_enregistrement,
     ligne_de_message_inconnu,
@@ -201,6 +200,8 @@ def test_la_pompe_s_arrete_sur_chaque_message_terminal(message: MessageFil) -> N
     ],
 )
 def test_la_pompe_continue_apres_chaque_message_courant(message: MessageFil) -> None:
+    """`PolitiqueRefusee` en fait partie : un `Termine` suit toujours, et c'est lui qui
+    réactive le bouton *Lancer*."""
     banc = BancDEssai(message)
     banc.pompe.tour()
     assert banc.pompe.active is True
@@ -413,11 +414,6 @@ def test_la_politique_refusee_porte_les_violations_mot_pour_mot() -> None:
     assert "longueur 8 inférieure au minimum du boîtier (12)" in lignes
     assert any("MinLength=12" in ligne for ligne in lignes)
     assert any("aucun compte" in ligne for ligne in lignes)
-
-
-def test_la_politique_refusee_laisse_la_pompe_tourner() -> None:
-    """Un `Termine` suit toujours : c'est lui qui réactive le bouton *Lancer*."""
-    assert est_terminal(PolitiqueRefusee((), PLANCHER)) is False
 
 
 # --- comptes enregistrables -----------------------------------------------

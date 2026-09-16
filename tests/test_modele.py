@@ -54,9 +54,11 @@ def test_un_lot_mene_a_son_terme_n_a_aucun_motif_d_arret() -> None:
     assert rapport.motif_arret is None
 
 
-def test_les_deux_motifs_d_arret_sont_distincts() -> None:
-    """Relancer suffit après une coupure réseau ; un arrêt fatal demande une
-    correction. La fenêtre doit pouvoir aiguiller là-dessus sans lire un texte."""
-    apres_coupure = Rapport(interrompu=True, motif_arret=MotifArret.RESEAU)
-    apres_erreur_fatale = Rapport(interrompu=True, motif_arret=MotifArret.FATAL)
-    assert apres_coupure.motif_arret != apres_erreur_fatale.motif_arret
+def test_un_rapport_porte_le_motif_d_arret_qu_on_lui_donne() -> None:
+    """Relancer suffit après une coupure réseau ; un arrêt fatal demande une correction.
+    Le rapport transporte ce verdict jusqu'à la fenêtre, qui aiguille dessus sans lire
+    un texte — les deux conduites tenues sont vérifiées par `lignes_du_rapport`."""
+    assert Rapport(interrompu=True, motif_arret=MotifArret.RESEAU).motif_arret is (
+        MotifArret.RESEAU
+    )
+    assert Rapport(interrompu=True, motif_arret=MotifArret.FATAL).motif_arret is MotifArret.FATAL
