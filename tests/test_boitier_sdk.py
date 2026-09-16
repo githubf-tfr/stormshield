@@ -169,6 +169,50 @@ def test_la_section_d_une_vraie_reponse_est_lue() -> None:
     )
 
 
+def test_une_ligne_etiquetee_dans_une_autre_casse_est_lue() -> None:
+    """En `format="section_line"`, le SDK construit chaque ligne dans un `dict` nu : la casse
+    des étiquettes de serverd n'est garantie par rien. Une ligne `Domain=` que l'adaptateur
+    cherche sous `domain` rendrait un boîtier vu comme vierge — et les deux gardes de
+    `CONFIG LDAP INITIALIZE`, la revérification de `creer_annuaire` comprise, sont la même
+    mesure : elles tomberaient ensemble."""
+    reponse = _reponse_section_line("Result", ["Domain=interne.local"])
+    assert [ligne["domain"] for ligne in _lignes(reponse)] == ["interne.local"]
+    boitier = _adaptateur(_ClientFactice(reponse=reponse))
+    assert boitier.lister_annuaires() == ["interne.local"]
+
+
+def test_les_comptes_et_les_groupes_se_lisent_quelle_que_soit_la_casse() -> None:
+    """Même mécanisme sur `USER LIST` et `USER GROUP LIST` : une liste vide y signifie
+    « rien sur le boîtier », donc tout à recréer à chaque passage."""
+    reponse = _reponse_section_line("Result", ["NAME=dupont", "Name=martin"])
+    boitier = _adaptateur(_ClientFactice(reponse=reponse))
+    assert boitier.lister_utilisateurs() == ["dupont", "martin"]
+    assert boitier.lister_groupes() == ["dupont", "martin"]
+
+
+def test_le_plancher_se_lit_quelle_que_soit_la_casse() -> None:
+    """Un jeton manqué vaut plancher nul, c'est-à-dire le garde-fou exactement à l'envers :
+    toute politique passerait la vérification."""
+    plancher = lire_plancher(
+        {"minlength": "12", "MINSETOFCHARS": "AlphaNum", "minEntropy": "40"}
+    )
+    assert (plancher.longueur_min, plancher.nombre_classes_min, plancher.entropie_min) == (
+        12,
+        2,
+        40,
+    )
+
+
+def test_la_section_fusionnee_reste_insensible_a_la_casse() -> None:
+    """La fusion des sections ne doit pas retomber dans un `dict` nu : `.data` et la valeur
+    de chaque section sont insensibles à la casse, la fusion doit l'être aussi."""
+    reponse = _reponse_section("PasswordPolicy", ["minlength=12", "minsetofchars=AlphaSpecial"])
+    fusion = _section_unique(reponse)
+    assert fusion["MinLength"] == "12"
+    plancher = lire_plancher(fusion)
+    assert (plancher.longueur_min, plancher.nombre_classes_min) == (12, 3)
+
+
 def test_une_reponse_brute_ne_fait_pas_planter_la_lecture() -> None:
     """`format="raw"` rend une chaîne, pas un Mapping."""
     reponse = _ReponseFactice('100 code=00a01000 msg="Ok" format="raw"\ntexte libre\n')

@@ -14,6 +14,7 @@ from typing import Any
 from xml.etree.ElementTree import ParseError
 
 import requests
+from requests.structures import CaseInsensitiveDict
 from stormshield.sns.sslclient import (
     AuthenticationError,
     MissingAuth,
@@ -166,14 +167,19 @@ def _nombre_de_classes(donnees: Mapping[str, Any], cle: str) -> int:
 
 
 def lire_plancher(donnees: Mapping[str, Any]) -> PlancherPolitique:
+    """Relit la table à travers une vue insensible à la casse avant d'y chercher ses trois
+    jetons. Rien ne garantit que serverd étiquette `MinLength` dans la casse de la
+    documentation, et une clé manquée vaudrait ici plancher nul : toute politique passerait
+    alors la vérification, c'est-à-dire le garde-fou exactement à l'envers."""
+    jetons: CaseInsensitiveDict[Any] = CaseInsensitiveDict(donnees)
     return PlancherPolitique(
-        longueur_min=_entier(donnees, "MinLength"),
-        nombre_classes_min=_nombre_de_classes(donnees, "MinSetOfChars"),
-        entropie_min=_entier(donnees, "MinEntropy"),
+        longueur_min=_entier(jetons, "MinLength"),
+        nombre_classes_min=_nombre_de_classes(jetons, "MinSetOfChars"),
+        entropie_min=_entier(jetons, "MinEntropy"),
     )
 
 
-def _lignes(reponse: Any) -> list[dict[str, Any]]:
+def _lignes(reponse: Any) -> list[CaseInsensitiveDict[Any]]:
     """Aplati les lignes d'une réponse `format="section_line"` (une ligne par utilisateur,
     groupe ou annuaire), quel que soit le nom de la section. `.data` associe un nom de
     section à sa liste de lignes ; ce nom lui-même n'est pas exploité ici, seule sa forme
@@ -184,26 +190,41 @@ def _lignes(reponse: Any) -> list[dict[str, Any]]:
     `dict` : un garde `isinstance(..., dict)` rendait systématiquement une liste vide, donc
     un boîtier vu comme vierge et tout recréé à chaque passage. Le test se fait sur
     `Mapping`.
+
+    Chaque ligne est réenveloppée dans une `CaseInsensitiveDict` plutôt que convertie en
+    `dict` nu, et ce n'est pas une précaution de style : en `format="section_line"` le SDK
+    construit la ligne dans un `dict` nu, jeton par jeton, donc sensible à la casse — et
+    `dict(ligne)` effaçait la même insensibilité partout ailleurs. Si serverd étiquette
+    `Domain` là où l'outil lit `domain`, `lister_annuaires()` rend une liste vide : le
+    boîtier est vu comme vierge, `lire_etat` lève `AnnuaireAbsent`, et la revérification de
+    `creer_annuaire` — même mesure, même résultat — laisse passer le seul
+    `CONFIG LDAP INITIALIZE` du produit, qui écrase la base d'un annuaire existant.
     """
     donnees = getattr(reponse, "data", None)
     if not isinstance(donnees, Mapping):
         return []
-    lignes: list[dict[str, Any]] = []
+    lignes: list[CaseInsensitiveDict[Any]] = []
     for section in donnees.values():
         if isinstance(section, list):
-            lignes.extend(dict(ligne) for ligne in section if isinstance(ligne, Mapping))
+            lignes.extend(
+                CaseInsensitiveDict(ligne) for ligne in section if isinstance(ligne, Mapping)
+            )
     return lignes
 
 
-def _section_unique(reponse: Any) -> dict[str, Any]:
+def _section_unique(reponse: Any) -> CaseInsensitiveDict[Any]:
     """Fusionne les sections d'une réponse `format="section"` (ex. politique de mot de
-    passe : un seul jeu de réglages par boîtier) en un seul dictionnaire de jetons.
+    passe : un seul jeu de réglages par boîtier) en une seule table de jetons.
 
     Deux couches à traverser, `Mapping` aux deux : `.data` est une `CaseInsensitiveDict`, et
     la valeur de chaque section en est une autre. Un `format="raw"` rend une chaîne, que le
-    garde écarte."""
+    garde écarte.
+
+    La fusion est elle aussi insensible à la casse : la verser dans un `dict` nu rendait
+    `MinLength` introuvable dès que le boîtier l'étiquetait autrement, donc un plancher de
+    politique nul — et toute politique acceptée."""
     donnees = getattr(reponse, "data", None)
-    fusion: dict[str, Any] = {}
+    fusion: CaseInsensitiveDict[Any] = CaseInsensitiveDict()
     if not isinstance(donnees, Mapping):
         return fusion
     for section in donnees.values():
