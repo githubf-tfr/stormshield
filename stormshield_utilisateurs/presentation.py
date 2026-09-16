@@ -10,6 +10,7 @@ sont aiguillées sur leur classe.
 """
 
 import contextlib
+import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -139,12 +140,68 @@ def message_de_fil(erreur: BaseException) -> MessageFil:
             return Echoue(str(erreur))
 
 
+@dataclass(frozen=True)
+class IncidentInterface:
+    """Une exception a traversé le fil de l'interface.
+
+    `message` est celui dont l'application a levé, ou None quand l'exception vient du
+    gestionnaire global de Tk — elle remonte alors d'un callback de widget, hors de
+    toute file.
+    """
+
+    erreur: BaseException
+    message: MessageFil | None = None
+
+
+Signaleur = Callable[[IncidentInterface], None]
+
+
+def lignes_de_l_incident(incident: IncidentInterface) -> list[str]:
+    """Trace complète, destinée au journal de la fenêtre.
+
+    Le produit n'a par conception aucun fichier de journal, et un exécutable construit
+    en mode fenêtré n'a pas de `stderr` : ce que Tk y écrirait n'existerait nulle part.
+    """
+    en_traitant = (
+        "" if incident.message is None else f" en traitant {type(incident.message).__name__}"
+    )
+    lignes = [
+        f"anomalie interne de l'interface{en_traitant} : "
+        f"{type(incident.erreur).__name__} : {incident.erreur}"
+    ]
+    trace = "".join(traceback.format_exception(incident.erreur)).splitlines()
+    lignes.extend(trace)
+    return lignes
+
+
+def resume_de_l_incident(incident: IncidentInterface) -> str:
+    """Une phrase pour la boîte de dialogue ; le détail reste dans le journal."""
+    return (
+        f"{type(incident.erreur).__name__} : {incident.erreur}\n\n"
+        "L'affichage a peut-être manqué des étapes ; la trace complète est dans le "
+        "journal de la fenêtre. Le travail déjà lancé sur le firewall, lui, se poursuit."
+    )
+
+
+def ligne_de_message_inconnu(message: MessageFil) -> str:
+    """Un message qu'aucune branche ne reconnaît ne doit pas disparaître en silence."""
+    return (
+        f"message non affiché, type inconnu de la fenêtre : {type(message).__name__}. "
+        "Le lot se poursuit ; signalez cette ligne."
+    )
+
+
 class PompeEvenements:
     """Vide la file de messages dans le fil de l'interface.
 
     Le fil d'exécution n'appelle jamais un widget : il dépose dans la file, et cette
     pompe — replanifiée par `after()` — est seule à en sortir les messages. La
     planification est injectée pour que la pompe se teste sans fenêtre.
+
+    Rien de ce qu'applique la pompe ne peut l'empêcher de se replanifier : une
+    exception qui remonterait jusqu'ici emporterait la replanification avec elle, et
+    la file cesserait d'être vidée — barre et journal gelés, bouton *Lancer* grisé,
+    pendant que le fil continue d'écrire sur le firewall.
     """
 
     def __init__(
@@ -152,11 +209,13 @@ class PompeEvenements:
         file: "Queue[MessageFil]",
         appliquer: Publieur,
         planifier: Callable[[int, Callable[[], None]], None],
+        signaler: Signaleur,
         periode_ms: int = PERIODE_POMPE_MS,
     ) -> None:
         self._file = file
         self._appliquer = appliquer
         self._planifier = planifier
+        self._signaler = signaler
         self._periode_ms = periode_ms
         self.active = True
 
@@ -168,11 +227,22 @@ class PompeEvenements:
                 break
             # Le message terminal n'interrompt pas la boucle : ce qui le précède dans
             # la file est déjà écrit et doit s'afficher.
-            self._appliquer(message)
+            try:
+                self._appliquer(message)
+            except Exception as erreur:
+                self._rendre_visible(IncidentInterface(erreur, message))
+            # Évalué même si l'application a levé : sans cela la pompe tournerait sans
+            # fin sur une file que plus rien n'alimente.
             if est_terminal(message):
                 self.active = False
         if self.active:
             self._planifier(self._periode_ms, self.tour)
+
+    def _rendre_visible(self, incident: IncidentInterface) -> None:
+        # Le signalement touche lui-même des widgets : s'il lâche à son tour, il n'y a
+        # plus rien au-dessus, et la pompe doit quand même se replanifier.
+        with contextlib.suppress(Exception):
+            self._signaler(incident)
 
 
 def politique_a_afficher(

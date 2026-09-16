@@ -16,11 +16,14 @@ Deux règles tiennent ce fichier :
 """
 
 import queue
+import sys
 import threading
 import tkinter as tk
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from types import TracebackType
 
 from stormshield_utilisateurs import lecture, sortie
 from stormshield_utilisateurs.execution import (
@@ -44,6 +47,7 @@ from stormshield_utilisateurs.presentation import (
     AnnuaireManquant,
     ComptesEnregistrables,
     Connexion,
+    IncidentInterface,
     MessageFil,
     Parametres,
     ParametresAnnuaire,
@@ -52,6 +56,8 @@ from stormshield_utilisateurs.presentation import (
     avertissement_perte_de_secrets,
     libelle_plancher,
     ligne_d_enregistrement,
+    ligne_de_message_inconnu,
+    lignes_de_l_incident,
     lignes_de_la_politique_refusee,
     lignes_du_fichier,
     lignes_du_plan,
@@ -59,6 +65,7 @@ from stormshield_utilisateurs.presentation import (
     obstacles_au_lancement,
     politique_a_afficher,
     reglage_barre,
+    resume_de_l_incident,
     travailler,
     travailler_annuaire,
 )
@@ -73,12 +80,38 @@ LIBELLE_CERTIFICAT = (
 )
 
 
+class _Racine(tk.Tk):
+    """`tk.Tk` dont le gestionnaire global d'exceptions passe par la fenêtre.
+
+    Tk appelle `report_callback_exception` pour tout ce qui remonte d'un callback de
+    widget — hors de la pompe, donc hors de son filet. Sa version d'origine écrit sur
+    `stderr`, absent d'un exécutable construit en mode fenêtré : l'opérateur ne verrait
+    rien. Surcharge plutôt qu'affectation d'attribut : une méthode ne se remplace pas
+    en place sans mentir sur son type.
+    """
+
+    def __init__(self, signaler: Callable[[BaseException], None]) -> None:
+        super().__init__()
+        self._signaler = signaler
+
+    def report_callback_exception(
+        self,
+        exc: type[BaseException],  # noqa: ARG002 - signature imposée par Tk
+        val: BaseException,
+        tb: TracebackType | None,  # noqa: ARG002 - la trace est déjà dans `val`
+    ) -> None:
+        self._signaler(val)
+
+
 class Fenetre:
     """Fenêtre principale. Tous ses widgets vivent dans le fil de l'interface."""
 
     def __init__(self) -> None:
-        self.racine = tk.Tk()
+        self.racine = _Racine(self._signaler_exception_tk)
         self.racine.title(TITRE)
+        # Vrai entre le démarrage d'un fil de lot et son message terminal : c'est ce
+        # que l'opérateur perdrait en fermant la fenêtre.
+        self.lot_en_cours = False
         # None tant qu'aucune connexion n'a renseigné le plancher du boîtier : c'est
         # ce qui grise les champs de politique et interdit d'écrire.
         self.politique: PolitiqueMotDePasse | None = None
@@ -330,18 +363,44 @@ class Fenetre:
             args=(parametres, utilisateurs, file.put),
             daemon=True,
         )
+        self.lot_en_cours = True
         fil.start()
         self._pomper(file, self._appliquer)
 
     def _pomper(self, file: "queue.Queue[MessageFil]", appliquer: Publieur) -> None:
-        PompeEvenements(file, appliquer, self._planifier).tour()
+        PompeEvenements(file, appliquer, self._planifier, self._signaler_incident).tour()
 
     def _planifier(self, delai_ms: int, rappel: Callable[[], None]) -> None:
         # `after` conserve la référence du rappel : la pompe survit à la fin de ce tour.
         self.racine.after(delai_ms, rappel)
 
     def _reactiver_lancement(self) -> None:
+        self.lot_en_cours = False
         self.bouton_lancer.configure(state=tk.NORMAL)
+
+    # --- anomalies internes ----------------------------------------------
+
+    def _signaler_incident(self, incident: IncidentInterface) -> None:
+        """Rend visible ce qui, sans cela, ne s'afficherait nulle part.
+
+        Tk écrit sa trace sur `stderr`, qui n'existe pas dans un exécutable construit
+        en mode fenêtré, et le produit n'a par conception aucun fichier de journal.
+        Le bouton *Lancer* est rendu à l'opérateur : l'anomalie a pu emporter la
+        branche qui s'en chargeait.
+        """
+        self._ecrire_lignes(lignes_de_l_incident(incident))
+        self._reactiver_lancement()
+        messagebox.showerror(
+            "Anomalie interne", resume_de_l_incident(incident), parent=self.racine
+        )
+
+    def _signaler_exception_tk(self, erreur: BaseException) -> None:
+        """Ce que Tk attrape hors de la pompe. Dernier recours : `stderr` s'il en reste."""
+        try:
+            self._signaler_incident(IncidentInterface(erreur))
+        except Exception:  # plus rien au-dessus : ne jamais reboucler sur Tk
+            if sys.stderr is not None:
+                traceback.print_exception(erreur, file=sys.stderr)
 
     # --- réception -------------------------------------------------------
 
@@ -384,8 +443,10 @@ class Fenetre:
             case AnnuaireManquant():
                 self._reactiver_lancement()
                 self._ouvrir_fenetre_annuaire()
-            case AnnuaireCree(domaine):
-                self._ecrire(f"annuaire {domaine} créé et activé")
+            case _:
+                # `AnnuaireCree` ne circule que sur la file du dialogue de création :
+                # ici, un message non reconnu est une anomalie, pas un cas de figure.
+                self._ecrire(ligne_de_message_inconnu(message))
 
     def _accueillir_plancher(self, plancher: PlancherPolitique) -> None:
         premiere_lecture = self.politique is None

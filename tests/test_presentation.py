@@ -45,14 +45,18 @@ from stormshield_utilisateurs.presentation import (
     AnnuaireManquant,
     ComptesEnregistrables,
     Connexion,
+    IncidentInterface,
     MessageFil,
     Parametres,
     ParametresAnnuaire,
     PompeEvenements,
+    Publieur,
     avertissement_perte_de_secrets,
     est_terminal,
     libelle_plancher,
     ligne_d_enregistrement,
+    ligne_de_message_inconnu,
+    lignes_de_l_incident,
     lignes_de_la_politique_refusee,
     lignes_du_fichier,
     lignes_du_plan,
@@ -61,6 +65,7 @@ from stormshield_utilisateurs.presentation import (
     obstacles_au_lancement,
     politique_a_afficher,
     reglage_barre,
+    resume_de_l_incident,
     travailler,
     travailler_annuaire,
 )
@@ -127,67 +132,57 @@ def test_le_libelle_du_plancher_nomme_les_trois_reglages_du_boitier() -> None:
 # --- pompe d'événements ---------------------------------------------------
 
 
+class BancDEssai:
+    """Une pompe et tout ce qu'elle a produit, sans le moindre widget."""
+
+    def __init__(self, *messages: MessageFil, appliquer: Publieur | None = None) -> None:
+        self.file: queue.Queue[MessageFil] = queue.Queue()
+        for message in messages:
+            self.file.put(message)
+        self.recus: list[MessageFil] = []
+        self.replanifications: list[int] = []
+        self.incidents: list[IncidentInterface] = []
+        self.pompe = PompeEvenements(
+            self.file,
+            appliquer if appliquer is not None else self.recus.append,
+            lambda delai, _rappel: self.replanifications.append(delai),
+            self.incidents.append,
+        )
+
+
 def test_la_pompe_vide_la_file_et_se_replanifie() -> None:
-    file: queue.Queue[MessageFil] = queue.Queue()
-    file.put(Journal("bonjour"))
-    file.put(Progression(1, 4))
-    recus: list[MessageFil] = []
-    replanifications: list[int] = []
-
-    def planifier(delai_ms: int, _rappel: Callable[[], None]) -> None:
-        replanifications.append(delai_ms)
-
-    pompe = PompeEvenements(file, recus.append, planifier, periode_ms=100)
-    pompe.tour()
-    assert recus == [Journal("bonjour"), Progression(1, 4)]
-    assert replanifications == [100]
-    assert pompe.active is True
-
-
-def test_la_pompe_s_arrete_sur_un_message_terminal() -> None:
-    file: queue.Queue[MessageFil] = queue.Queue()
-    file.put(Termine(Rapport()))
-    recus: list[MessageFil] = []
-    replanifications: list[int] = []
-    pompe = PompeEvenements(
-        file, recus.append, lambda delai, _rappel: replanifications.append(delai)
-    )
-    pompe.tour()
-    assert isinstance(recus[0], Termine)
-    assert pompe.active is False
-    assert replanifications == []
+    banc = BancDEssai(Journal("bonjour"), Progression(1, 4))
+    banc.pompe.tour()
+    assert banc.recus == [Journal("bonjour"), Progression(1, 4)]
+    assert banc.replanifications == [100]
+    assert banc.pompe.active is True
 
 
 def test_la_pompe_sur_file_vide_se_replanifie_sans_rien_appliquer() -> None:
-    file: queue.Queue[MessageFil] = queue.Queue()
-    recus: list[MessageFil] = []
-    replanifications: list[int] = []
-    pompe = PompeEvenements(
-        file, recus.append, lambda delai, _rappel: replanifications.append(delai)
-    )
-    pompe.tour()
-    assert recus == []
-    assert replanifications == [100]
+    banc = BancDEssai()
+    banc.pompe.tour()
+    assert banc.recus == []
+    assert banc.replanifications == [100]
 
 
 def test_la_pompe_applique_le_reste_de_la_file_avant_de_s_arreter() -> None:
     """Un message terminal n'autorise pas à jeter ce qui le précède dans la file."""
-    file: queue.Queue[MessageFil] = queue.Queue()
-    file.put(Journal("avant"))
-    file.put(Echoue("arrêt"))
-    recus: list[MessageFil] = []
-    pompe = PompeEvenements(file, recus.append, lambda _delai, _rappel: None)
-    pompe.tour()
-    assert recus == [Journal("avant"), Echoue("arrêt")]
-    assert pompe.active is False
+    banc = BancDEssai(Journal("avant"), Echoue("arrêt"))
+    banc.pompe.tour()
+    assert banc.recus == [Journal("avant"), Echoue("arrêt")]
+    assert banc.pompe.active is False
 
 
 @pytest.mark.parametrize(
     "message",
     [Termine(Rapport()), Echoue("x"), AnnuaireManquant(), AnnuaireCree("interne.local")],
 )
-def test_les_messages_terminaux_arretent_la_pompe(message: MessageFil) -> None:
-    assert est_terminal(message) is True
+def test_la_pompe_s_arrete_sur_chaque_message_terminal(message: MessageFil) -> None:
+    banc = BancDEssai(message)
+    banc.pompe.tour()
+    assert banc.recus == [message]
+    assert banc.pompe.active is False
+    assert banc.replanifications == []
 
 
 @pytest.mark.parametrize(
@@ -195,12 +190,113 @@ def test_les_messages_terminaux_arretent_la_pompe(message: MessageFil) -> None:
     [
         Journal("x"),
         PolitiqueLue(PLANCHER),
+        PolitiqueRefusee(("trop court",), PLANCHER),
         Progression(1, 2),
         CreationReussie(CompteCree("a", "b")),
     ],
 )
-def test_les_messages_courants_laissent_la_pompe_tourner(message: MessageFil) -> None:
-    assert est_terminal(message) is False
+def test_la_pompe_continue_apres_chaque_message_courant(message: MessageFil) -> None:
+    banc = BancDEssai(message)
+    banc.pompe.tour()
+    assert banc.pompe.active is True
+    assert banc.replanifications == [100]
+
+
+# --- la pompe survit à ce qui lève ----------------------------------------
+
+
+def test_une_exception_dans_l_application_ne_tue_pas_la_pompe() -> None:
+    """Sans replanification, la file n'est plus vidée : barre et journal gèlent, le
+    bouton *Lancer* reste grisé, et le fil continue d'écrire sur le firewall."""
+    recus: list[MessageFil] = []
+
+    def appliquer(message: MessageFil) -> None:
+        if isinstance(message, Progression):
+            raise ValueError("widget détruit")
+        recus.append(message)
+
+    banc = BancDEssai(Progression(1, 4), Journal("après"), appliquer=appliquer)
+    banc.pompe.tour()
+    assert recus == [Journal("après")]
+    assert banc.replanifications == [100]
+    assert banc.pompe.active is True
+
+
+def test_une_exception_dans_l_application_est_signalee_avec_son_message() -> None:
+    def appliquer(_message: MessageFil) -> None:
+        raise ValueError("widget détruit")
+
+    banc = BancDEssai(Progression(1, 4), appliquer=appliquer)
+    banc.pompe.tour()
+    assert len(banc.incidents) == 1
+    assert isinstance(banc.incidents[0].erreur, ValueError)
+    assert banc.incidents[0].message == Progression(1, 4)
+
+
+def test_un_message_terminal_qui_leve_arrete_quand_meme_la_pompe() -> None:
+    """Sans cela la pompe tournerait sans fin sur une file que plus rien n'alimente."""
+
+    def appliquer(_message: MessageFil) -> None:
+        raise ValueError("widget détruit")
+
+    banc = BancDEssai(Termine(Rapport()), appliquer=appliquer)
+    banc.pompe.tour()
+    assert banc.pompe.active is False
+    assert len(banc.incidents) == 1
+
+
+def test_un_signalement_qui_leve_ne_tue_pas_la_pompe_non_plus() -> None:
+    """Dernier filet : s'il lâche, la pompe doit malgré tout se replanifier."""
+    file: queue.Queue[MessageFil] = queue.Queue()
+    file.put(Journal("x"))
+    replanifications: list[int] = []
+
+    def exploser(*_arguments: object) -> None:
+        raise ValueError("journal détruit")
+
+    pompe = PompeEvenements(
+        file,
+        exploser,
+        lambda delai, _rappel: replanifications.append(delai),
+        exploser,
+    )
+    pompe.tour()
+    assert replanifications == [100]
+    assert pompe.active is True
+
+
+def test_les_lignes_de_l_incident_nomment_le_message_et_portent_la_trace() -> None:
+    """Le produit n'a aucun fichier de journal, et un .exe fenêtré n'a pas de stderr :
+    ce que Tk y écrirait n'existerait nulle part."""
+    try:
+        raise ValueError("widget détruit")
+    except ValueError as erreur:
+        incident = IncidentInterface(erreur, Progression(1, 4))
+    lignes = lignes_de_l_incident(incident)
+    assert "Progression" in lignes[0]
+    assert "ValueError" in lignes[0]
+    assert "widget détruit" in lignes[0]
+    assert any("Traceback" in ligne for ligne in lignes[1:])
+
+
+def test_un_incident_sans_message_ne_nomme_aucun_message() -> None:
+    """Le gestionnaire global de Tk attrape ce qui remonte d'un callback de widget :
+    il n'y a alors aucun message de la file en cause."""
+    lignes = lignes_de_l_incident(IncidentInterface(ValueError("bing")))
+    assert "en traitant" not in lignes[0]
+    assert "ValueError" in lignes[0]
+
+
+def test_le_resume_de_l_incident_dit_que_le_lot_continue() -> None:
+    resume = resume_de_l_incident(IncidentInterface(ValueError("bing")))
+    assert "bing" in resume
+    assert "journal" in resume
+
+
+def test_un_message_inconnu_de_la_fenetre_laisse_une_trace() -> None:
+    """Un message non reconnu disparaissait sans rien dire."""
+    ligne = ligne_de_message_inconnu(Progression(1, 2))
+    assert "Progression" in ligne
 
 
 # --- barre de progression -------------------------------------------------
