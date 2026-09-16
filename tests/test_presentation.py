@@ -966,6 +966,64 @@ def _mentionne_self(expression: ast.expr) -> bool:
     )
 
 
+def _noms_mentionnes(expression: ast.expr) -> set[str]:
+    return {noeud.id for noeud in ast.walk(expression) if isinstance(noeud, ast.Name)}
+
+
+def _fonctions_qui_atteignent_self(arbre: ast.Module) -> set[str]:
+    """Noms des fonctions de ce source dont le corps mentionne `self`, méthodes comprises.
+
+    C'est le contournement réaliste : `def publier(m): self._appliquer(m)` passée en
+    argument ne montre aucun jeton `self` au point d'appel, et le fil appelle pourtant
+    une méthode de la fenêtre en boucle.
+    """
+    return {
+        noeud.name
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.FunctionDef | ast.AsyncFunctionDef)
+        and any(
+            isinstance(interne, ast.Name) and interne.id == "self"
+            for interne in ast.walk(noeud)
+        )
+    }
+
+
+# Toute autre façon de lancer un fil que `threading.Thread(target=...)` est refusée en
+# bloc : la fenêtre n'en a aucun besoin, et refuser le constructeur coûte moins cher que
+# d'analyser ce qu'on lui passe. Comparaison sur le dernier segment du nom appelé, pour
+# ne pas dépendre du style d'import.
+_LANCEURS_INTERDITS = frozenset(
+    {
+        "Timer",
+        "submit",
+        "run_in_executor",
+        "start_new_thread",
+        "ThreadPoolExecutor",
+        "ProcessPoolExecutor",
+        "Process",
+    }
+)
+
+
+def _lanceurs_interdits(arbre: ast.Module) -> list[str]:
+    return [
+        f"lanceur de fil interdit : {ast.unparse(noeud.func)}"
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.Call)
+        and ast.unparse(noeud.func).rpartition(".")[2] in _LANCEURS_INTERDITS
+    ]
+
+
+def _sous_classes_de_thread(arbre: ast.Module) -> list[str]:
+    """Une sous-classe de `Thread` porte la fenêtre dans son état : aucun `target=` à lire."""
+    return [
+        f"classe dérivée de Thread : {noeud.name}"
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.ClassDef)
+        and any(ast.unparse(base).rpartition(".")[2] == "Thread" for base in noeud.bases)
+    ]
+
+
 def _appels_de_fil(arbre: ast.Module, noms: set[str]) -> list[ast.Call]:
     return [
         noeud
@@ -976,17 +1034,37 @@ def _appels_de_fil(arbre: ast.Module, noms: set[str]) -> list[ast.Call]:
 
 
 def _fils_qui_pourraient_toucher_un_widget(source: str) -> list[str]:
-    """Un motif d'infraction par fil douteux. Liste vide = aucun fil ne peut nuire.
+    """Un motif d'infraction par fil douteux. Liste vide = aucune infraction *visible*.
 
-    Vérifie la cible *et* ce qu'on lui passe : `args` porte le publieur, c'est-à-dire
-    précisément ce que le fil appelle en boucle, et ce publieur-là touche le journal,
-    la barre, les boutons et ouvre des boîtes de dialogue. Une cible propre avec une
-    méthode de la fenêtre dans `args` est exactement aussi dangereuse qu'une mauvaise
-    cible.
+    Ce que la règle vérifie : un fil ne peut naître que d'un `threading.Thread` doté
+    d'un `target=` nommé, cette cible vient de `presentation` — module où `tkinter` est
+    interdit par un autre test —, et ni la cible ni les arguments ne mentionnent `self`
+    ni un nom de fonction de ce source qui, lui, atteint `self`. Les `args` comptent
+    autant que la cible : ils portent le publieur, c'est-à-dire ce que le fil appelle en
+    boucle, et ce publieur touche le journal, la barre, les boutons et les dialogues.
+    Toute autre façon de lancer un fil — `Timer`, exécuteur, sous-classe de `Thread` —
+    est refusée en bloc.
+
+    Ce qu'elle **ne garantit pas**, et qu'aucune règle statique de cette forme ne
+    garantira :
+
+    - un widget rangé *dans* un objet passé au fil : la règle lit des noms, elle ne
+      suit pas les valeurs. Un `Parametres` qui porterait un `tk.Entry` passerait ;
+    - une capture indirecte : `def publier(m): aider(m)`, où seule `aider` atteint
+      `self`, n'est pas vue — seule la mention directe de `self` dans le corps l'est ;
+    - un widget atteint par une variable globale ou par un autre module, sans passer
+      par `self` ;
+    - un fil lancé depuis un module autre que `fenetre.py`, que ce test ne lit pas ;
+    - ce que fait `presentation` de ce qu'on lui donne : la règle s'arrête au point
+      d'appel.
+
+    Autrement dit : elle attrape les contournements distraits, pas un contournement
+    décidé. Ce qui passe ici se paiera en recette, un jour de coupure réseau.
     """
     arbre = ast.parse(source)
     venus = _venus_de_presentation(arbre)
-    infractions: list[str] = []
+    dangereuses = _fonctions_qui_atteignent_self(arbre)
+    infractions = _lanceurs_interdits(arbre) + _sous_classes_de_thread(arbre)
     for appel in _appels_de_fil(arbre, _noms_de_thread(arbre)):
         if appel.args:
             infractions.append("fil construit avec des arguments positionnels")
@@ -995,11 +1073,13 @@ def _fils_qui_pourraient_toucher_un_widget(source: str) -> list[str]:
             infractions.append("fil sans target= nommé")
         elif ast.unparse(cible.value) not in venus:
             infractions.append(f"cible hors de presentation : {ast.unparse(cible.value)}")
-        infractions.extend(
-            f"{mot.arg}= mentionne self : {ast.unparse(mot.value)}"
-            for mot in appel.keywords
-            if _mentionne_self(mot.value)
-        )
+        for mot in appel.keywords:
+            if _mentionne_self(mot.value):
+                infractions.append(f"{mot.arg}= mentionne self : {ast.unparse(mot.value)}")
+            infractions.extend(
+                f"{mot.arg}= porte {nom}, qui atteint self"
+                for nom in sorted(_noms_mentionnes(mot.value) & dangereuses)
+            )
     return infractions
 
 
@@ -1081,3 +1161,69 @@ def test_le_garde_fou_refuse_un_fil_sans_target_nomme() -> None:
         "fil construit avec des arguments positionnels",
         "fil sans target= nommé",
     ]
+
+
+# Les cinq contournements relevés en re-revue. Les quatre premiers se couvrent ; le
+# cinquième — un widget rangé dans un objet passé au fil — ne se couvre pas par une
+# règle statique, et la docstring du garde-fou le dit.
+
+_FIL_A_FERMETURE_LOCALE = """
+import threading
+from stormshield_utilisateurs.presentation import travailler
+
+class Fenetre:
+    def _demarrer(self, parametres, utilisateurs):
+        def publier(message):
+            self._appliquer(message)
+        threading.Thread(
+            target=travailler, args=(parametres, utilisateurs, publier), daemon=True
+        ).start()
+"""
+
+_FIL_PAR_TIMER = """
+import threading
+
+class Fenetre:
+    def _demarrer(self):
+        threading.Timer(1.0, self._appliquer).start()
+"""
+
+_FIL_PAR_EXECUTOR = """
+from concurrent.futures import ThreadPoolExecutor
+
+class Fenetre:
+    def _demarrer(self):
+        ThreadPoolExecutor().submit(self._appliquer)
+"""
+
+_FIL_PAR_SOUS_CLASSE = """
+import threading
+
+class FilDuLot(threading.Thread):
+    def __init__(self, fenetre):
+        super().__init__(daemon=True)
+        self._fenetre = fenetre
+
+    def run(self):
+        self._fenetre.journal.insert("fini")
+"""
+
+
+def test_le_garde_fou_refuse_une_fermeture_locale_qui_capture_self() -> None:
+    """Le cas réaliste : au point d'appel, `publier` ne montre aucun jeton `self`, et
+    pourtant le fil appelle en boucle une méthode de la fenêtre."""
+    infractions = _fils_qui_pourraient_toucher_un_widget(_FIL_A_FERMETURE_LOCALE)
+    assert any("publier" in infraction for infraction in infractions)
+
+
+def test_le_garde_fou_refuse_un_fil_lance_par_un_timer() -> None:
+    assert _fils_qui_pourraient_toucher_un_widget(_FIL_PAR_TIMER) != []
+
+
+def test_le_garde_fou_refuse_un_fil_lance_par_un_executeur() -> None:
+    assert _fils_qui_pourraient_toucher_un_widget(_FIL_PAR_EXECUTOR) != []
+
+
+def test_le_garde_fou_refuse_une_sous_classe_de_thread() -> None:
+    """Une sous-classe porte la fenêtre dans son état : aucun `target=` à inspecter."""
+    assert _fils_qui_pourraient_toucher_un_widget(_FIL_PAR_SOUS_CLASSE) != []

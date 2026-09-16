@@ -11,7 +11,9 @@ Quatre règles tiennent ce fichier :
 - le fil d'exécution ne touche jamais un widget. Il reçoit un objet figé, publie dans
   une `queue`, et `PompeEvenements` — replanifiée par `after()` — est seule à ramener
   ces messages dans le fil de l'interface. Rien de `self` ne lui est passé, cible comme
-  arguments : un test de structure le vérifie sur ce source ;
+  arguments, et aucun fil ne naît autrement que d'un `threading.Thread` : un test de
+  structure le vérifie sur ce source. Ce garde-fou attrape les contournements
+  distraits, pas un contournement décidé — sa docstring dit ce qu'il ne voit pas ;
 - aucun aiguillage sur une chaîne. `_appliquer` filtre sur le type du message, et les
   exceptions du métier ont été traduites en types par `message_de_fil` ;
 - rien ne disparaît en silence. Ce que la pompe ou Tk attrape part au journal, et une
