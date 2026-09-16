@@ -681,6 +681,41 @@ def test_un_plan_sans_groupe_ni_orphelin_n_annonce_ni_l_un_ni_l_autre() -> None:
     assert lignes_du_plan(plan) == ["dupont : à créer"]
 
 
+# --- secrets hors du repr -------------------------------------------------
+
+
+def test_le_mot_de_passe_d_administration_ne_figure_pas_dans_le_repr() -> None:
+    """Fuite latente, et elle traverserait précisément la frontière que `boitier_sdk`
+    blinde à grands frais : `Connexion` voyage jusqu'au fil d'exécution, et son `repr`
+    apparaîtrait dans une trace, une assertion qui échoue ou une ligne de journal."""
+    session = connexion(mot_de_passe="MotDePasseAdmin!")
+    assert "MotDePasseAdmin!" not in repr(session)
+    assert "firewall.local" in repr(session)
+    assert session.mot_de_passe == "MotDePasseAdmin!"
+    # Les paramètres du lot portent la connexion : la fuite passerait aussi par eux.
+    assert "MotDePasseAdmin!" not in repr(
+        Parametres(
+            connexion=session,
+            fichier=Path("entree.csv"),
+            simulation=False,
+            politique=DURCIE,
+        )
+    )
+
+
+def test_le_secret_de_l_annuaire_ne_figure_pas_dans_le_repr() -> None:
+    """Celui de `cn=StormshieldAdmin` : le secret de la commande la plus destructrice."""
+    annuaire = ParametresAnnuaire(
+        domainname="interne.local",
+        organisation="Org",
+        dc="dc",
+        mot_de_passe="SecretAnnuaire!",
+    )
+    assert "SecretAnnuaire!" not in repr(annuaire)
+    assert "interne.local" in repr(annuaire)
+    assert annuaire.mot_de_passe == "SecretAnnuaire!"
+
+
 # --- confirmation avant écriture ------------------------------------------
 
 

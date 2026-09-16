@@ -85,10 +85,16 @@ class Plan:
 
 @dataclass(frozen=True)
 class CompteCree:
-    """`mot_de_passe` est vide quand USER PASSWORD a échoué malgré les réessais."""
+    """`mot_de_passe` est vide quand USER PASSWORD a échoué malgré les réessais.
+
+    Le secret est hors du `repr` : il reste comparé et transporté comme avant, mais
+    n'apparaît plus dans une ligne de journal, une assertion de test qui échoue ou un
+    formateur de trace. Le mot de passe généré ne doit sortir que par le CSV que
+    l'opérateur désigne.
+    """
 
     identifiant: str
-    mot_de_passe: str
+    mot_de_passe: str = field(repr=False)
 
 
 @dataclass(frozen=True)

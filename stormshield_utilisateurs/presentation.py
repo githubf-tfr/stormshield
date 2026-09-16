@@ -13,7 +13,7 @@ import contextlib
 import threading
 import traceback
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -121,11 +121,16 @@ class Connexion:
 
     Aucun identifiant n'est mémorisé d'un lancement à l'autre : cet objet naît au clic
     sur *Lancer* et disparaît avec le fil qui l'a reçu.
+
+    Le mot de passe d'administration est hors du `repr` : aucun chemin ne l'affiche
+    aujourd'hui, mais cet objet traverse la frontière que `boitier_sdk` blinde à grands
+    frais. Une ligne de journal ajoutée un jour, une assertion de test qui échoue, un
+    formateur de trace, et le secret sortirait par là.
     """
 
     hote: str
     compte: str
-    mot_de_passe: str
+    mot_de_passe: str = field(repr=False)
     verifier_certificat: bool
 
 
@@ -147,13 +152,15 @@ class ParametresAnnuaire:
     """Saisie de la fenêtre de création d'annuaire.
 
     `mot_de_passe` est celui de `cn=StormshieldAdmin`, saisi par l'opérateur : l'outil
-    ne le génère pas et ne le conserve nulle part après l'envoi de la commande.
+    ne le génère pas et ne le conserve nulle part après l'envoi de la commande. Il est
+    donc aussi hors du `repr` — c'est le secret de la commande la plus destructrice du
+    produit.
     """
 
     domainname: str
     organisation: str
     dc: str
-    mot_de_passe: str
+    mot_de_passe: str = field(repr=False)
 
 
 def est_terminal(message: MessageFil) -> bool:

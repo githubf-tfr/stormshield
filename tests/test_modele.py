@@ -62,3 +62,15 @@ def test_un_rapport_porte_le_motif_d_arret_qu_on_lui_donne() -> None:
         MotifArret.RESEAU
     )
     assert Rapport(interrompu=True, motif_arret=MotifArret.FATAL).motif_arret is MotifArret.FATAL
+
+
+def test_le_mot_de_passe_d_un_compte_cree_ne_figure_pas_dans_son_repr() -> None:
+    """Fuite latente : aucun chemin ne l'affiche aujourd'hui, mais une ligne de journal
+    ajoutée un jour, une assertion de test qui échoue ou un formateur de trace suffirait.
+    Le secret reste comparé et transporté comme avant, il ne s'imprime plus."""
+    compte = CompteCree("dupont", "S3cret-Genere!")
+    assert "S3cret-Genere!" not in repr(compte)
+    assert "dupont" in repr(compte)
+    assert compte.mot_de_passe == "S3cret-Genere!"
+    assert compte == CompteCree("dupont", "S3cret-Genere!")
+    assert compte != CompteCree("dupont", "autre")
