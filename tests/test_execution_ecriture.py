@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 
-from stormshield_utilisateurs.boitier import ErreurCommande, ErreurReseau
+from stormshield_utilisateurs.boitier import ErreurCommande, ErreurFatale, ErreurReseau
 from stormshield_utilisateurs.boitier_memoire import BoitierMemoire
 from stormshield_utilisateurs.execution import (
     CreationReussie,
@@ -542,3 +542,84 @@ def test_deconnexion_apres_un_lot_nominal() -> None:
     boitier = BoitierMemoire()
     _lancer(boitier, [_utilisateur("dupont")])
     assert boitier.connecte is False
+
+
+def test_erreur_fatale_a_la_connexion_initiale_arrete_sans_reconnecter() -> None:
+    """Un mot de passe d'administration faux ne doit jamais déclencher de réessai :
+    chaque tentative de connexion alimente le verrouillage anti-bruteforce."""
+    boitier = BoitierMemoire()
+
+    def refuser_l_authentification(operation: str, _cible: str) -> None:
+        if operation == "connecter":
+            raise ErreurFatale("authentification refusée")
+
+    boitier.declencheur = refuser_l_authentification
+    rapport, evenements = _lancer(boitier, [_utilisateur("dupont")])
+    assert rapport.interrompu is True
+    assert boitier.connexions == 0
+    assert [operation for operation, _ in boitier.journal_appels].count("connecter") == 1
+    assert any(isinstance(evenement, Termine) for evenement in evenements)
+    assert any("corrigez" in texte for texte in _textes(evenements))
+
+
+def test_erreur_fatale_en_cours_d_ecriture_arrete_sans_reconnecter() -> None:
+    """Une ErreurFatale surgie pendant l'écriture ne doit provoquer aucune tentative
+    de reconnexion, contrairement à une ErreurReseau."""
+    boitier = BoitierMemoire()
+
+    def refuser_legrand(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "legrand":
+            raise ErreurFatale("configuration incomplète")
+
+    boitier.declencheur = refuser_legrand
+    rapport, evenements = _lancer(
+        boitier, [_utilisateur("dupont"), _utilisateur("legrand", ligne=3)]
+    )
+    assert rapport.interrompu is True
+    assert [compte.identifiant for compte in rapport.comptes_crees] == ["dupont"]
+    assert boitier.connexions == 1
+    assert [operation for operation, _ in boitier.journal_appels].count("connecter") == 1
+    assert any(isinstance(evenement, Termine) for evenement in evenements)
+    assert any("corrigez" in texte for texte in _textes(evenements))
+
+
+def test_erreur_fatale_a_la_reconnexion_n_essaie_qu_une_fois() -> None:
+    """Coupure réseau puis identifiants devenus invalides : un seul appel de
+    reconnexion, jamais les trois tentatives prévues pour une panne réseau."""
+    boitier = BoitierMemoire()
+    appels_apres_coupure = 0
+
+    def couper_puis_refuser_la_reconnexion(operation: str, cible: str) -> None:
+        nonlocal appels_apres_coupure
+        if operation == "creer_utilisateur" and cible == "dupont" and boitier.connexions == 1:
+            raise ErreurReseau("liaison perdue")
+        if operation == "connecter" and boitier.connexions >= 1:
+            appels_apres_coupure += 1
+            raise ErreurFatale("authentification refusée")
+
+    boitier.declencheur = couper_puis_refuser_la_reconnexion
+    rapport, evenements = _lancer(boitier, [_utilisateur("dupont")])
+    assert appels_apres_coupure == 1
+    assert rapport.interrompu is True
+    assert boitier.connexions == 1
+    assert any(isinstance(evenement, Termine) for evenement in evenements)
+    assert any("corrigez" in texte for texte in _textes(evenements))
+
+
+def test_erreur_fatale_pendant_la_replanification_arrete_net() -> None:
+    """La reconnexion réussit, mais la relecture qui suit révèle une configuration
+    incomplète : arrêt net, message d'arrêt fatal, pas un « relecture impossible »
+    générique qui laisserait croire à une simple panne réseau."""
+    boitier = BoitierMemoire()
+
+    def couper_puis_bloquer_la_relecture(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "dupont" and boitier.connexions == 1:
+            raise ErreurReseau("liaison perdue")
+        if operation == "lister_utilisateurs" and boitier.connexions >= 2:
+            raise ErreurFatale("configuration incomplète")
+
+    boitier.declencheur = couper_puis_bloquer_la_relecture
+    rapport, evenements = _lancer(boitier, [_utilisateur("dupont")])
+    assert rapport.interrompu is True
+    assert any(isinstance(evenement, Termine) for evenement in evenements)
+    assert any("corrigez" in texte for texte in _textes(evenements))

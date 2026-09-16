@@ -7,7 +7,13 @@ from dataclasses import dataclass, field, replace
 
 from stormshield_utilisateurs import motdepasse
 from stormshield_utilisateurs import plan as construction_plan
-from stormshield_utilisateurs.boitier import Boitier, ErreurBoitier, ErreurCommande, ErreurReseau
+from stormshield_utilisateurs.boitier import (
+    Boitier,
+    ErreurBoitier,
+    ErreurCommande,
+    ErreurFatale,
+    ErreurReseau,
+)
 from stormshield_utilisateurs.modele import (
     CompteCree,
     Echec,
@@ -234,8 +240,8 @@ def executer(
                     f"basculé en minuscules -> {utilisateur.identifiant}"
                 )
             )
-    boitier.connecter()
     try:
+        boitier.connecter()
         etat = lire_etat(boitier)
         emettre(PolitiqueLue(etat.plancher))
         plan_courant = construction_plan.construire(utilisateurs, etat)
@@ -258,6 +264,11 @@ def executer(
                 patience,
                 generer_mot_de_passe,
             )
+    except ErreurFatale as erreur:
+        # D'où qu'elle vienne — connexion initiale, lecture d'état, écriture en
+        # cours de lot, tentative de reconnexion — une reconnexion ne la résoudra
+        # jamais : aucun réessai, arrêt immédiat.
+        _arreter_fatal(rapport, emettre, erreur)
     finally:
         # La déconnexion d'une liaison déjà perdue n'ajoute rien au rapport.
         with contextlib.suppress(ErreurBoitier):
@@ -298,6 +309,10 @@ def _appliquer(
             operations_avant = reste.nombre_operations()
             try:
                 reste = _replanifier(boitier, utilisateurs, etat, refuses)
+            except ErreurFatale:
+                # Classe fille d'ErreurBoitier : à intercepter avant elle, sinon
+                # cette clause ne serait jamais atteinte.
+                raise
             except ErreurBoitier as erreur:
                 _arreter(rapport, emettre, f"relecture impossible ({erreur})")
                 return
@@ -324,6 +339,21 @@ def _arreter(rapport: Rapport, emettre: Emetteur, motif: str) -> None:
         Journal(
             f"arrêt : {motif}. Ce qui est créé reste créé, "
             "le CSV des mots de passe couvre les comptes réellement créés."
+        )
+    )
+
+
+def _arreter_fatal(rapport: Rapport, emettre: Emetteur, erreur: ErreurFatale) -> None:
+    """Arrêt immédiat, sans aucune reconnexion : contrairement à une liaison perdue,
+    une ErreurFatale ne se résoudra pas en rejouant la même connexion — la répéter
+    ne ferait qu'alimenter le verrouillage anti-bruteforce du boîtier."""
+    rapport.interrompu = True
+    emettre(
+        Journal(
+            f"arrêt définitif : {erreur}. Une reconnexion n'y changerait rien : "
+            "corrigez les identifiants ou la configuration avant de relancer le lot. "
+            "Ce qui est créé reste créé, le CSV des mots de passe couvre les comptes "
+            "réellement créés."
         )
     )
 
@@ -364,6 +394,12 @@ def _reconnecter(boitier: Boitier, patience: Patience, emettre: Emetteur) -> boo
         patience.dormir(patience.delai)
         try:
             boitier.connecter()
+        except ErreurFatale:
+            # Classe fille d'ErreurBoitier : à intercepter avant elle. Réessayer une
+            # authentification refusée n'aboutirait jamais et nourrirait le
+            # verrouillage anti-bruteforce du boîtier — une seule tentative suffit
+            # à le savoir.
+            raise
         except ErreurBoitier:
             emettre(
                 Journal(f"reconnexion {tentative}/{patience.tentatives_connexion} échouée")
