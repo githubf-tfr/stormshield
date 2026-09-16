@@ -471,6 +471,43 @@ def test_progression_atteint_le_total_quand_une_creation_echoue() -> None:
     assert _progressions(evenements)[-1] == Progression(accomplies=10, total=10)
 
 
+def test_arret_definitif_gele_la_barre_sous_son_total() -> None:
+    """Contrat de fin de lot : sur arrêt définitif la barre ne rejoint pas son total.
+    Elle reste où le lot s'est arrêté, ce qui est le seul affichage honnête."""
+    boitier = BoitierMemoire()
+
+    def couper_le_mot_de_passe_puis_la_liaison(operation: str, _cible: str) -> None:
+        if operation == "definir_mot_de_passe":
+            raise ErreurReseau("liaison perdue")
+        if operation == "connecter" and boitier.connexions >= 1:
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_le_mot_de_passe_puis_la_liaison
+    rapport, evenements = _lancer(
+        boitier, [_utilisateur("dupont"), _utilisateur("legrand", ligne=3)]
+    )
+    assert rapport.interrompu is True
+    # 4 lectures + le seul USER CREATE parvenu à son terme, sur 4 lectures + 2 comptes.
+    assert _progressions(evenements)[-1] == Progression(accomplies=5, total=8)
+
+
+def test_le_total_ne_croit_jamais_apres_un_recalcul() -> None:
+    """Contrat de fin de lot : un recalcul après reconnexion ne peut que faire
+    décroître le total, jamais le faire monter — la barre ne recule pas."""
+    boitier = BoitierMemoire()
+
+    def couper_apres_le_premier(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "legrand" and boitier.connexions == 1:
+            boitier.utilisateurs.append("legrand")  # le boîtier a exécuté avant la coupure
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_apres_le_premier
+    _, evenements = _lancer(boitier, [_utilisateur("dupont"), _utilisateur("legrand", ligne=3)])
+    totaux = [progression.total for progression in _progressions(evenements)]
+    assert totaux == sorted(totaux, reverse=True)
+    assert totaux[-1] < totaux[0]
+
+
 def test_bascule_en_minuscules_signalee_au_journal() -> None:
     utilisateur = Utilisateur(
         ligne=2,
