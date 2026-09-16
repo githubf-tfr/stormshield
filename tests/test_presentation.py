@@ -681,6 +681,33 @@ def test_un_plan_sans_groupe_ni_orphelin_n_annonce_ni_l_un_ni_l_autre() -> None:
     assert lignes_du_plan(plan) == ["dupont : à créer"]
 
 
+# --- fabrique de production du boîtier ------------------------------------
+
+
+def test_boitier_de_la_connexion_porte_le_choix_de_l_operateur_jusqu_au_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`test_la_case_de_verification_du_certificat_atteint_le_constructeur_du_sdk`
+    (test_boitier_sdk.py) prouve la patte du bas : que `BoitierSDK` porte la case jusqu'au
+    SDK. Aucun test ne prouvait la patte du dessus, cette fabrique de production elle-même
+    — les douze autres sites de test injectent tous un double via `fabriquer_boitier`, sans
+    jamais l'exécuter."""
+    recus: list[dict[str, object]] = []
+
+    class _BoitierSDKCapturant:
+        def __init__(self, **mots_cles: object) -> None:
+            recus.append(mots_cles)
+
+    monkeypatch.setattr(
+        "stormshield_utilisateurs.boitier_sdk.BoitierSDK", _BoitierSDKCapturant
+    )
+
+    presentation.boitier_de_la_connexion(connexion(verifier_certificat=True))
+    presentation.boitier_de_la_connexion(connexion(verifier_certificat=False))
+
+    assert [recu["verifier_certificat"] for recu in recus] == [True, False]
+
+
 # --- secrets hors du repr -------------------------------------------------
 
 
