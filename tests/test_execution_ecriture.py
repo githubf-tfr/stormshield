@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 
+from stormshield_utilisateurs import motdepasse
 from stormshield_utilisateurs.boitier import ErreurCommande, ErreurFatale, ErreurReseau
 from stormshield_utilisateurs.boitier_memoire import BoitierMemoire
 from stormshield_utilisateurs.execution import (
@@ -10,11 +11,18 @@ from stormshield_utilisateurs.execution import (
     Journal,
     Patience,
     PlanPret,
+    PolitiqueLue,
+    PolitiqueRefusee,
     Progression,
     Termine,
     executer,
 )
-from stormshield_utilisateurs.modele import PolitiqueMotDePasse, Rapport, Utilisateur
+from stormshield_utilisateurs.modele import (
+    PlancherPolitique,
+    PolitiqueMotDePasse,
+    Rapport,
+    Utilisateur,
+)
 
 POLITIQUE = PolitiqueMotDePasse(
     longueur=16, minuscules=True, majuscules=True, chiffres=True, speciaux=True
@@ -509,6 +517,54 @@ def test_le_total_ne_croit_jamais_apres_un_recalcul() -> None:
     totaux = [progression.total for progression in _progressions(evenements)]
     assert totaux == sorted(totaux, reverse=True)
     assert totaux[-1] < totaux[0]
+
+
+def test_une_politique_sous_le_plancher_arrete_avant_toute_ecriture() -> None:
+    """Le plancher lu sur le boîtier visé fait foi : une politique plus faible ne peut
+    pas partir. Sans cette garde, chaque USER PASSWORD serait refusé un par un, et le
+    plancher mis en cache par un lancement antérieur suffirait à laisser passer le lot."""
+    boitier = BoitierMemoire(
+        plancher=PlancherPolitique(longueur_min=24, nombre_classes_min=4, entropie_min=0)
+    )
+    rapport, evenements = _lancer(boitier, [_utilisateur("dupont", "compta")])
+    assert _ecritures(boitier) == []
+    assert rapport.comptes_crees == []
+    assert rapport.interrompu is True
+    refus = [
+        evenement for evenement in evenements if isinstance(evenement, PolitiqueRefusee)
+    ]
+    # Les violations circulent telles que `violations()` les rend : la fenêtre les
+    # affiche mot pour mot, elle n'a rien à reconstruire ni à interpréter.
+    assert refus[0].violations == tuple(motdepasse.violations(POLITIQUE, boitier.plancher))
+    assert refus[0].plancher == boitier.plancher
+
+
+def test_le_plancher_est_emis_avant_le_refus_de_la_politique() -> None:
+    """La fenêtre doit pouvoir montrer le plancher réellement lu à côté du refus."""
+    boitier = BoitierMemoire(
+        plancher=PlancherPolitique(longueur_min=24, nombre_classes_min=4, entropie_min=0)
+    )
+    _, evenements = _lancer(boitier, [_utilisateur("dupont")])
+    types = [type(evenement) for evenement in evenements]
+    assert types.index(PolitiqueLue) < types.index(PolitiqueRefusee)
+    assert types[-1] is Termine
+
+
+def test_la_simulation_refuse_aussi_une_politique_sous_le_plancher() -> None:
+    """La lecture a lieu dans les deux modes : le refus aussi, sans quoi la simulation
+    afficherait un plan que le lot réel ne pourrait jamais appliquer."""
+    boitier = BoitierMemoire(
+        plancher=PlancherPolitique(longueur_min=24, nombre_classes_min=4, entropie_min=0)
+    )
+    rapport, evenements = _lancer(boitier, [_utilisateur("dupont")], simulation=True)
+    assert any(isinstance(evenement, PolitiqueRefusee) for evenement in evenements)
+    assert not any(isinstance(evenement, PlanPret) for evenement in evenements)
+    assert rapport.interrompu is True
+
+
+def test_une_politique_qui_tient_le_plancher_ne_refuse_rien() -> None:
+    _, evenements = _lancer(BoitierMemoire(), [_utilisateur("dupont")])
+    assert not any(isinstance(evenement, PolitiqueRefusee) for evenement in evenements)
 
 
 def test_bascule_en_minuscules_signalee_au_journal() -> None:

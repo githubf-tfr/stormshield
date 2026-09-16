@@ -142,6 +142,20 @@ class PolitiqueLue:
 
 
 @dataclass(frozen=True)
+class PolitiqueRefusee:
+    """La politique choisie descend sous le plancher du boîtier réellement visé.
+
+    Le lot s'arrête avant le moindre envoi : sans cela chaque `USER PASSWORD` serait
+    refusé un par un, sans que rien ne relie ces refus à leur cause. Les violations
+    voyagent telles que `motdepasse.violations` les rend, pour que la fenêtre les
+    affiche mot pour mot sans rien reconstruire.
+    """
+
+    violations: tuple[str, ...]
+    plancher: PlancherPolitique
+
+
+@dataclass(frozen=True)
 class PlanPret:
     """Plan à afficher. Réémis après une reconnexion, avec le plan reconstruit."""
 
@@ -178,7 +192,14 @@ class Echoue:
 
 
 Evenement = (
-    Journal | PolitiqueLue | PlanPret | Progression | CreationReussie | Termine | Echoue
+    Journal
+    | PolitiqueLue
+    | PolitiqueRefusee
+    | PlanPret
+    | Progression
+    | CreationReussie
+    | Termine
+    | Echoue
 )
 Emetteur = Callable[[Evenement], None]
 
@@ -244,26 +265,33 @@ def executer(
         boitier.connecter()
         etat = lire_etat(boitier)
         emettre(PolitiqueLue(etat.plancher))
-        plan_courant = construction_plan.construire(utilisateurs, etat)
-        compteur.fixer_total(
-            NOMBRE_LECTURES + (0 if simulation else plan_courant.nombre_operations())
-        )
-        for _ in range(NOMBRE_LECTURES):
-            compteur.avancer()
-        emettre(PlanPret(plan_courant))
-        if not simulation:
-            _appliquer(
-                boitier,
-                utilisateurs,
-                etat,
-                plan_courant,
-                politique,
-                rapport,
-                compteur,
-                emettre,
-                patience,
-                generer_mot_de_passe,
+        # Le plancher qui fait foi est celui du boîtier que l'on vient de lire, jamais
+        # celui qu'un lancement antérieur aurait laissé en mémoire : changer d'hôte
+        # entre deux lots suffirait à écrire sous le plancher du nouveau.
+        manquements = tuple(motdepasse.violations(politique, etat.plancher))
+        if manquements:
+            _arreter_politique(rapport, emettre, manquements, etat.plancher)
+        else:
+            plan_courant = construction_plan.construire(utilisateurs, etat)
+            compteur.fixer_total(
+                NOMBRE_LECTURES + (0 if simulation else plan_courant.nombre_operations())
             )
+            for _ in range(NOMBRE_LECTURES):
+                compteur.avancer()
+            emettre(PlanPret(plan_courant))
+            if not simulation:
+                _appliquer(
+                    boitier,
+                    utilisateurs,
+                    etat,
+                    plan_courant,
+                    politique,
+                    rapport,
+                    compteur,
+                    emettre,
+                    patience,
+                    generer_mot_de_passe,
+                )
     except ErreurFatale as erreur:
         # D'où qu'elle vienne — connexion initiale, lecture d'état, écriture en
         # cours de lot, tentative de reconnexion — une reconnexion ne la résoudra
@@ -354,6 +382,28 @@ def _arreter_fatal(rapport: Rapport, emettre: Emetteur, erreur: ErreurFatale) ->
             "corrigez les identifiants ou la configuration avant de relancer le lot. "
             "Ce qui est créé reste créé, le CSV des mots de passe couvre les comptes "
             "réellement créés."
+        )
+    )
+
+
+def _arreter_politique(
+    rapport: Rapport,
+    emettre: Emetteur,
+    manquements: tuple[str, ...],
+    plancher: PlancherPolitique,
+) -> None:
+    """Arrêt avant la première écriture : l'opérateur doit durcir sa politique.
+
+    Comme l'arrêt fatal, il ne se résout pas en relançant tel quel — d'où le même
+    traitement au rapport.
+    """
+    rapport.interrompu = True
+    emettre(PolitiqueRefusee(manquements, plancher))
+    emettre(
+        Journal(
+            "arrêt avant tout envoi : la politique de mot de passe descend sous le "
+            "plancher du boîtier — " + " ; ".join(manquements) + ". Aucun compte n'a "
+            "été touché ; durcissez la politique, puis relancez."
         )
     )
 
