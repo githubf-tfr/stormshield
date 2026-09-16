@@ -3,7 +3,7 @@
 import contextlib
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from stormshield_utilisateurs import motdepasse
 from stormshield_utilisateurs import plan as construction_plan
@@ -157,6 +157,19 @@ Evenement = (
 Emetteur = Callable[[Evenement], None]
 
 
+@dataclass
+class _Refuses:
+    """Noms que le boîtier a explicitement refusés pendant le lot.
+
+    Un refus n'est pas une perte de liaison : la commande a été reçue et rejetée,
+    la rejouer donnerait le même verdict. Le plan reconstruit après une reconnexion
+    les écarte, sans quoi le rapport porterait deux fois le même échec.
+    """
+
+    comptes: set[str] = field(default_factory=set)
+    groupes: set[str] = field(default_factory=set)
+
+
 class _Compteur:
     """Porte l'avancement de la barre de progression."""
 
@@ -247,12 +260,13 @@ def _appliquer(
 ) -> None:
     """Boucle d'écriture. Sur perte de liaison : reconnecte, reconstruit, reprend."""
     reste = plan_courant
+    refuses = _Refuses()
     while True:
         try:
-            _creer_groupes(boitier, reste, rapport, compteur, emettre)
+            _creer_groupes(boitier, reste, rapport, compteur, emettre, refuses)
             _creer_comptes(
                 boitier, reste, politique, rapport, compteur, emettre,
-                patience, generer_mot_de_passe,
+                patience, generer_mot_de_passe, refuses,
             )
             return
         except ErreurReseau:
@@ -263,7 +277,7 @@ def _appliquer(
             # On ne rejoue jamais la commande interrompue : on relit et on replanifie.
             operations_avant = reste.nombre_operations()
             try:
-                reste = _replanifier(boitier, utilisateurs, etat)
+                reste = _replanifier(boitier, utilisateurs, etat, refuses)
             except ErreurBoitier as erreur:
                 _arreter(rapport, emettre, f"relecture impossible ({erreur})")
                 return
@@ -295,7 +309,8 @@ def _arreter(rapport: Rapport, emettre: Emetteur, motif: str) -> None:
 
 
 def _replanifier(
-    boitier: Boitier, utilisateurs: Sequence[Utilisateur], etat: EtatBoitier
+    boitier: Boitier, utilisateurs: Sequence[Utilisateur], etat: EtatBoitier,
+    refuses: _Refuses,
 ) -> Plan:
     """Reprise en milieu de lot : seuls les comptes et les groupes sont relus.
 
@@ -304,8 +319,23 @@ def _replanifier(
     sur un chemin que rien ne décrit.
     """
     comptes, groupes = lire_comptes_et_groupes(boitier)
-    return construction_plan.construire(
+    plan_reconstruit = construction_plan.construire(
         utilisateurs, replace(etat, utilisateurs=comptes, groupes=groupes)
+    )
+    # Ce que le boîtier a refusé ne repart pas : le refus est déjà au rapport, et le
+    # rejouer le compterait une fois de plus sans rien créer.
+    return replace(
+        plan_reconstruit,
+        comptes_a_creer=tuple(
+            compte
+            for compte in plan_reconstruit.comptes_a_creer
+            if compte.identifiant not in refuses.comptes
+        ),
+        groupes_a_creer=tuple(
+            groupe
+            for groupe in plan_reconstruit.groupes_a_creer
+            if groupe.nom not in refuses.groupes
+        ),
     )
 
 
@@ -326,12 +356,13 @@ def _reconnecter(boitier: Boitier, patience: Patience, emettre: Emetteur) -> boo
 
 def _creer_groupes(
     boitier: Boitier, plan_courant: Plan, rapport: Rapport,
-    compteur: _Compteur, emettre: Emetteur,
+    compteur: _Compteur, emettre: Emetteur, refuses: _Refuses,
 ) -> None:
     for groupe in plan_courant.groupes_a_creer:
         try:
             boitier.creer_groupe(groupe.nom)
         except ErreurCommande as erreur:
+            refuses.groupes.add(groupe.nom)
             rapport.echecs.append(Echec(groupe.nom, "USER GROUP CREATE", str(erreur)))
             emettre(Journal(f"groupe {groupe.nom} : échec de création ({erreur})"))
         else:
@@ -344,6 +375,7 @@ def _creer_comptes(
     boitier: Boitier, plan_courant: Plan, politique: PolitiqueMotDePasse,
     rapport: Rapport, compteur: _Compteur, emettre: Emetteur,
     patience: Patience, generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str],
+    refuses: _Refuses,
 ) -> None:
     for utilisateur in plan_courant.comptes_a_creer:
         try:
@@ -352,6 +384,7 @@ def _creer_comptes(
                 plan_courant.domaine,
             )
         except ErreurCommande as erreur:
+            refuses.comptes.add(utilisateur.identifiant)
             rapport.echecs.append(Echec(utilisateur.identifiant, "USER CREATE", str(erreur)))
             emettre(Journal(f"{utilisateur.identifiant} : échec de création ({erreur})"))
             # Aucun mot de passe n'a été généré : le secret n'est pas consommé.

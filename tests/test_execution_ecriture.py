@@ -353,6 +353,48 @@ def test_trois_reconnexions_infructueuses_puis_arret_net() -> None:
     assert any(isinstance(evenement, Termine) for evenement in evenements)
 
 
+def test_un_compte_refuse_n_est_pas_rejoue_apres_une_reconnexion() -> None:
+    """Le compte refusé n'existe pas sur le boîtier : le plan reconstruit le remettrait
+    à créer, il échouerait encore, et le rapport compterait deux fois le même échec."""
+    boitier = BoitierMemoire()
+
+    def refuser_admin_et_couper_sur_legrand(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "admin":
+            raise ErreurCommande(200, "uid interdit")
+        if operation == "creer_utilisateur" and cible == "legrand" and boitier.connexions == 1:
+            boitier.utilisateurs.append("legrand")  # le boîtier a exécuté avant la coupure
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = refuser_admin_et_couper_sur_legrand
+    rapport, _ = _lancer(boitier, [_utilisateur("admin"), _utilisateur("legrand", ligne=3)])
+    appels = [cible for operation, cible in boitier.journal_appels
+              if operation == "creer_utilisateur"]
+    assert appels.count("admin") == 1
+    assert [echec.identifiant for echec in rapport.echecs] == ["admin"]
+
+
+def test_un_groupe_refuse_n_est_pas_rejoue_apres_une_reconnexion() -> None:
+    """Même règle pour USER GROUP CREATE : un refus est signalé une fois."""
+    boitier = BoitierMemoire()
+
+    def refuser_le_groupe_et_couper_sur_alice(operation: str, cible: str) -> None:
+        if operation == "creer_groupe":
+            raise ErreurCommande(200, "guillemet double interdit")
+        if operation == "definir_mot_de_passe" and cible == "alice":
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = refuser_le_groupe_et_couper_sur_alice
+    rapport, _ = _lancer(
+        boitier,
+        [_utilisateur("alice", 'Groupe "A"'), _utilisateur("bob", 'Groupe "A"', ligne=3)],
+    )
+    assert [operation for operation, _ in boitier.journal_appels].count("creer_groupe") == 1
+    creations_de_groupe = [
+        echec for echec in rapport.echecs if echec.operation == "USER GROUP CREATE"
+    ]
+    assert len(creations_de_groupe) == 1
+
+
 def test_une_ecriture_qui_echoue_durablement_arrete_le_lot() -> None:
     """La reconnexion et les relectures passent, mais l'écriture retombe : le plan
     reconstruit est identique au précédent. Sans exigence de progrès, la boucle
