@@ -5,4 +5,15 @@ __pycache__/
 .coverage
 .superpowers/
 .worktrees/
+.claude/
 .review-tmp/
+
+build/
+dist/
+*.spec
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+# CSV de mots de passe : ne doit jamais entrer dans le repo, même par mégarde.
+mots_de_passe*.csv
+*.egg-info/

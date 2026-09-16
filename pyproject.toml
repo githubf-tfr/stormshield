@@ -1,0 +1,44 @@
+[project]
+name = "stormshield-utilisateurs"
+version = "1.0.0"
+description = "Injection en lot d'utilisateurs LDAP sur firewall Stormshield SNS"
+requires-python = ">=3.11"
+dependencies = ["stormshield.sns.sslclient>=1.1.2"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11", "pyinstaller>=6.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["stormshield_utilisateurs"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "N", "SIM", "ARG", "PTH", "RUF"]
+# RUF001-003 signalent les caractères Unicode ambigus : le code est en français et
+# les accents ne doivent pas être traités comme des anomalies.
+# N818 impose une Exception *suffixe* par Error, mais le français préfixe par Erreur.
+ignore = ["RUF001", "RUF002", "RUF003", "N818"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["stormshield_utilisateurs", "tests"]
+strict = true
+
+# Le SDK Stormshield ne publie pas de stubs.
+[[tool.mypy.overrides]]
+module = ["stormshield.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Le marqueur firewall exige un boîtier joignable : exclu par défaut, `pytest -m firewall`
+# le rappelle explicitement (le -m de la ligne de commande écrase celui-ci).
+addopts = "-m 'not firewall'"
+markers = ["firewall: exige un boîtier SNS joignable, exclu par défaut"]

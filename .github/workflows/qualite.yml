@@ -1,0 +1,24 @@
+name: qualite
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  qualite:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Le plancher déclaré par requires-python et la version de développement.
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+      - run: mypy
+      # Le marqueur firewall est déjà exclu par addopts ; répété ici pour que le
+      # workflow dise lui-même ce qu'il ne prouve pas.
+      - run: pytest -m "not firewall" -q
