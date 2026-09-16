@@ -29,6 +29,13 @@ from stormshield_utilisateurs.modele import (
 # CONFIG LDAP LIST, CONFIG PASSWDPOLICY SHOW, USER LIST, USER GROUP LIST.
 NOMBRE_LECTURES = 4
 
+# Tours de reconnexion consécutifs sans écriture aboutie que le lot tolère avant de
+# s'arrêter. Un seul, parce qu'une coupure sur la première commande d'écriture laisse
+# par construction un plan intact : « aucun progrès » y est l'état normal, pas une
+# pathologie. Au deuxième, plus rien ne distingue cette situation d'une écriture qui
+# retombe indéfiniment, et la boucle doit se fermer.
+TOURS_SANS_PROGRES_TOLERES = 1
+
 
 class AnnuaireAbsent(Exception):
     """Aucun annuaire interne : c'est le seul cas où CONFIG LDAP INITIALIZE est atteignable."""
@@ -340,7 +347,10 @@ def _appliquer(
     """Boucle d'écriture. Sur perte de liaison : reconnecte, reconstruit, reprend."""
     reste = plan_courant
     refuses = _Refuses()
+    # Tours de reconnexion consécutifs sans qu'aucune écriture n'ait abouti.
+    tours_sans_progres = 0
     while True:
+        accomplies_avant = compteur.accomplies
         try:
             _creer_groupes(boitier, reste, rapport, compteur, emettre, refuses)
             _creer_comptes(
@@ -354,7 +364,6 @@ def _appliquer(
                 _arreter(rapport, emettre, "liaison irrécupérable")
                 return
             # On ne rejoue jamais la commande interrompue : on relit et on replanifie.
-            operations_avant = reste.nombre_operations()
             try:
                 reste = _replanifier(boitier, utilisateurs, etat, refuses)
             except ErreurFatale:
@@ -364,17 +373,26 @@ def _appliquer(
             except ErreurBoitier as erreur:
                 _arreter(rapport, emettre, f"relecture impossible ({erreur})")
                 return
-            # Seul un progrès autorise un tour de plus. Une écriture qui retombe
-            # durablement laisse un plan identique : reboucler dessus ferait tourner
-            # l'outil sans fin, à `delai` près, sans jamais rien créer de plus.
-            if reste.nombre_operations() >= operations_avant:
-                _arreter(
-                    rapport, emettre,
-                    "la reconnexion n'a fait progresser aucune écriture "
-                    f"({reste.nombre_operations()} opérations restantes, "
-                    f"{operations_avant} avant la coupure)",
-                )
-                return
+            # Le progrès se mesure sur les écritures réellement accomplies, jamais sur
+            # la taille du plan : tant qu'aucune n'a abouti — le cas d'une coupure sur
+            # la toute première commande —, le plan reconstruit est forcément identique,
+            # et l'y lire ferait avorter le lot entier sur un seul clignotement réseau.
+            #
+            # Un tour sans progrès est donc toléré. Le second ferme la boucle sans fin
+            # qu'une écriture retombant indéfiniment ouvrirait : reconnexion, relecture,
+            # même plan, à `delai` près et sans jamais rien créer de plus.
+            if compteur.accomplies > accomplies_avant:
+                tours_sans_progres = 0
+            else:
+                tours_sans_progres += 1
+                if tours_sans_progres > TOURS_SANS_PROGRES_TOLERES:
+                    _arreter(
+                        rapport, emettre,
+                        f"{tours_sans_progres} reconnexions de suite n'ont fait aboutir "
+                        f"aucune écriture ({reste.nombre_operations()} opérations "
+                        "restantes)",
+                    )
+                    return
             # Le plan a changé : le total aussi, sans quoi la barre viserait un total
             # qu'aucune opération restante ne peut plus atteindre.
             compteur.fixer_total(compteur.accomplies + reste.nombre_operations())

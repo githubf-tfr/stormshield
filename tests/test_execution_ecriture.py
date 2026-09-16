@@ -454,6 +454,30 @@ def test_un_groupe_refuse_n_est_pas_rejoue_apres_une_reconnexion() -> None:
     assert len(creations_de_groupe) == 1
 
 
+def test_une_coupure_sur_la_toute_premiere_ecriture_ne_fait_pas_avorter_le_lot() -> None:
+    """Une coupure unique sur la première commande d'écriture, reconnectée du premier
+    coup : aucune écriture n'a encore abouti, donc le plan reconstruit est forcément
+    identique. Mesurer le progrès sur la taille du plan faisait lire là une pathologie
+    et arrêtait le lot à zéro compte, en accusant le boîtier d'un défaut inexistant."""
+    boitier = BoitierMemoire()
+    coupures = 0
+
+    def couper_la_premiere_ecriture(operation: str, _cible: str) -> None:
+        nonlocal coupures
+        if operation == "creer_groupe" and coupures == 0:
+            coupures += 1
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_la_premiere_ecriture
+    rapport, evenements = _lancer(boitier, [_utilisateur("dupont", "compta")])
+    assert coupures == 1
+    assert boitier.connexions == 2
+    assert rapport.interrompu is False
+    assert [compte.identifiant for compte in rapport.comptes_crees] == ["dupont"]
+    assert rapport.groupes_crees == ["compta"]
+    assert not any("aucune écriture" in texte for texte in _textes(evenements))
+
+
 def test_une_ecriture_qui_echoue_durablement_arrete_le_lot() -> None:
     """La reconnexion et les relectures passent, mais l'écriture retombe : le plan
     reconstruit est identique au précédent. Sans exigence de progrès, la boucle
