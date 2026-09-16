@@ -350,15 +350,29 @@ def _creer_comptes(
         compteur.avancer()
         # Génération au moment de la création effective, jamais à la construction du plan.
         secret = generer_mot_de_passe(politique)
-        retenu = _definir_mot_de_passe(
-            boitier, utilisateur.identifiant, secret, rapport, emettre, patience
-        )
+        # Le compte est inscrit au rapport dès sa création : le CSV de sortie est la
+        # liste de reprise de l'opérateur, et une coupure survenue après USER CREATE
+        # ne doit pas pouvoir effacer un compte qui existe bel et bien sur le boîtier.
+        rang = len(rapport.comptes_crees)
+        rapport.comptes_crees.append(CompteCree(utilisateur.identifiant, ""))
+        try:
+            retenu = _definir_mot_de_passe(
+                boitier, utilisateur.identifiant, secret, rapport, emettre, patience
+            )
+        except ErreurReseau:
+            _signaler_interruption(
+                rapport, emettre, utilisateur.identifiant, "USER PASSWORD",
+                "coupure réseau après la création : compte créé sans mot de passe "
+                "utilisable, à reprendre à la main",
+            )
+            emettre(CreationReussie(rapport.comptes_crees[rang]))
+            raise
         compteur.avancer()
         compte = CompteCree(utilisateur.identifiant, retenu)
-        rapport.comptes_crees.append(compte)
+        rapport.comptes_crees[rang] = compte
         emettre(Journal(f"{utilisateur.identifiant} : créé"))
         emettre(CreationReussie(compte))
-        for groupe in utilisateur.groupes:
+        for rang_groupe, groupe in enumerate(utilisateur.groupes):
             try:
                 boitier.ajouter_membre(groupe, utilisateur.identifiant)
             except ErreurCommande as erreur:
@@ -368,7 +382,31 @@ def _creer_comptes(
                 emettre(
                     Journal(f"{utilisateur.identifiant} : non rattaché à {groupe} ({erreur})")
                 )
+            except ErreurReseau:
+                # Le plan reconstruit ne rattrapera pas ces rattachements : il ne
+                # calcule d'ADDUSER que pour les comptes à créer, et celui-ci vient
+                # de basculer dans les comptes déjà présents.
+                restants = ", ".join(utilisateur.groupes[rang_groupe:])
+                _signaler_interruption(
+                    rapport, emettre, utilisateur.identifiant, "USER GROUP ADDUSER",
+                    f"coupure réseau pendant le rattachement : groupes non rattachés "
+                    f"({restants}), à reprendre à la main",
+                )
+                raise
             compteur.avancer()
+
+
+def _signaler_interruption(
+    rapport: Rapport, emettre: Emetteur, identifiant: str, operation: str, motif: str
+) -> None:
+    """Trace d'une coupure en plein travail sur un compte déjà créé.
+
+    Sans elle, le compte sortirait du lot sans figurer ni aux échecs ni nulle part
+    ailleurs : il existerait sur le boîtier et un relancement le classerait « déjà
+    présent » à jamais, sans jamais le réparer.
+    """
+    rapport.echecs.append(Echec(identifiant, operation, motif))
+    emettre(Journal(f"{identifiant} : {motif}"))
 
 
 def _definir_mot_de_passe(

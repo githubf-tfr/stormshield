@@ -274,6 +274,52 @@ def test_reconnexion_reconstruit_le_plan_au_lieu_de_rejouer() -> None:
     assert derniere.accomplies == derniere.total
 
 
+def test_coupure_entre_la_creation_et_le_mot_de_passe_laisse_une_trace() -> None:
+    """Le compte existe sur le boîtier : il doit figurer au rapport, sans mot de passe,
+    et un échec doit le nommer. Sans cela l'opérateur perd un compte sans le savoir."""
+    boitier = BoitierMemoire()
+
+    def couper_le_mot_de_passe_de_dupont(operation: str, cible: str) -> None:
+        if operation == "definir_mot_de_passe" and cible == "dupont":
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_le_mot_de_passe_de_dupont
+    rapport, evenements = _lancer(
+        boitier, [_utilisateur("dupont"), _utilisateur("legrand", ligne=3)]
+    )
+    assert "dupont" in boitier.utilisateurs
+    assert "dupont" not in boitier.mots_de_passe
+    assert [compte.identifiant for compte in rapport.comptes_crees] == ["dupont", "legrand"]
+    assert [compte.identifiant for compte in rapport.sans_mot_de_passe] == ["dupont"]
+    assert any(
+        echec.identifiant == "dupont" and echec.operation == "USER PASSWORD"
+        for echec in rapport.echecs
+    )
+    creations = [
+        evenement for evenement in evenements if isinstance(evenement, CreationReussie)
+    ]
+    assert [evenement.compte for evenement in creations] == rapport.comptes_crees
+
+
+def test_coupure_pendant_le_rattachement_laisse_une_trace() -> None:
+    """Le plan reconstruit ne rattrape pas un compte devenu « déjà présent » :
+    l'interruption doit laisser un échec exploitable."""
+    boitier = BoitierMemoire(groupes=["compta"])
+
+    def couper_le_rattachement(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible == "compta/dupont":
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_le_rattachement
+    rapport, _ = _lancer(boitier, [_utilisateur("dupont", "compta")])
+    assert boitier.membres == {}
+    assert [compte.identifiant for compte in rapport.comptes_crees] == ["dupont"]
+    assert any(
+        echec.identifiant == "dupont" and echec.operation == "USER GROUP ADDUSER"
+        for echec in rapport.echecs
+    )
+
+
 def test_la_reprise_ne_relit_que_les_comptes_et_les_groupes() -> None:
     """Ni l'annuaire ni la politique : ils ne changent pas au milieu d'un lot."""
     boitier = BoitierMemoire()
