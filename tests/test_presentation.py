@@ -552,7 +552,25 @@ def test_une_creation_d_annuaire_refusee_remonte_le_refus() -> None:
     assert boitier.connecte is False
 
 
-# --- aucun secret ne s'échappe --------------------------------------------
+# --- garde-fous de structure ----------------------------------------------
+#
+# Ces deux tests lisent des fichiers source sans les importer : `fenetre.py` importe
+# `tkinter`, qui peut être absent de la machine. Ils vérifient une propriété que
+# l'exécution ne montrerait qu'en recette, sur un boîtier, un jour de coupure réseau.
+
+
+def _arbre(module_source: str) -> ast.Module:
+    return ast.parse(Path(module_source).read_text(encoding="utf-8"))
+
+
+def _modules_importes(arbre: ast.Module) -> list[str]:
+    importes: list[str] = []
+    for noeud in ast.walk(arbre):
+        if isinstance(noeud, ast.Import):
+            importes.extend(alias.name for alias in noeud.names)
+        elif isinstance(noeud, ast.ImportFrom) and noeud.module is not None:
+            importes.append(noeud.module)
+    return importes
 
 
 def test_le_module_de_presentation_n_importe_pas_tkinter() -> None:
@@ -561,11 +579,33 @@ def test_le_module_de_presentation_n_importe_pas_tkinter() -> None:
     Le jour où un raccourci ferait remonter un widget ici, toute la suite deviendrait
     incollectable sur le runner d'intégration continue — ce test le dit avant.
     """
-    arbre = ast.parse(Path(presentation.__file__).read_text(encoding="utf-8"))
-    importes: list[str] = []
-    for noeud in ast.walk(arbre):
-        if isinstance(noeud, ast.Import):
-            importes.extend(alias.name for alias in noeud.names)
-        elif isinstance(noeud, ast.ImportFrom) and noeud.module is not None:
-            importes.append(noeud.module)
+    importes = _modules_importes(_arbre(presentation.__file__))
     assert [nom for nom in importes if nom.partition(".")[0] == "tkinter"] == []
+
+
+def test_les_fils_lances_par_la_fenetre_ne_peuvent_toucher_aucun_widget() -> None:
+    """La règle « le fil ne touche jamais un widget » est vérifiée par construction.
+
+    Chaque `threading.Thread` de la fenêtre vise une fonction de `presentation`, module
+    où `tkinter` est interdit par le test ci-dessus. Une fonction de `Fenetre` passée en
+    cible rouvrirait la porte, et aucun test ne pourrait plus la refermer : le fil n'a
+    pas d'appelant, et Tk ne signale pas toujours un widget touché hors de son fil.
+    """
+    source = Path(presentation.__file__).with_name("fenetre.py")
+    arbre = _arbre(str(source))
+    venus_de_presentation = {
+        alias.asname or alias.name
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.ImportFrom)
+        and noeud.module == "stormshield_utilisateurs.presentation"
+        for alias in noeud.names
+    }
+    cibles: list[str] = []
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, ast.Call) or ast.unparse(noeud.func) != "threading.Thread":
+            continue
+        argument = next((mot for mot in noeud.keywords if mot.arg == "target"), None)
+        assert argument is not None, "un fil sans `target=` nommé échappe à ce garde-fou"
+        cibles.append(ast.unparse(argument.value))
+    assert cibles, "la fenêtre doit lancer son travail dans un fil"
+    assert set(cibles) <= venus_de_presentation
