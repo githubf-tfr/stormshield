@@ -50,6 +50,7 @@ from stormshield_utilisateurs.execution import (
 from stormshield_utilisateurs.modele import (
     PlancherPolitique,
     PolitiqueMotDePasse,
+    Rejet,
     Utilisateur,
 )
 from stormshield_utilisateurs.presentation import (
@@ -363,7 +364,7 @@ class Fenetre:
         self._ecrire(ligne_de_nouveau_lot(simulation=parametres.simulation))
         self._ecrire_lignes(lignes_du_fichier(utilisateurs, rejets))
         self.bouton_lancer.configure(state=tk.DISABLED)
-        self._demarrer(parametres, utilisateurs)
+        self._demarrer(parametres, utilisateurs, rejets)
 
     def _confirmer_la_perte_des_secrets(self) -> bool:
         """Dernier rempart avant qu'un nouveau lot efface les mots de passe du précédent.
@@ -382,7 +383,12 @@ class Fenetre:
             parent=self.racine,
         )
 
-    def _demarrer(self, parametres: Parametres, utilisateurs: list[Utilisateur]) -> None:
+    def _demarrer(
+        self,
+        parametres: Parametres,
+        utilisateurs: list[Utilisateur],
+        rejets: list[Rejet],
+    ) -> None:
         # Le lot précédent est soldé : sa liste ne doit pas se mélanger à celle-ci, et
         # le bouton ne doit pas rester actif sur un contenu qui vient d'être vidé.
         self.enregistrables.reinitialiser()
@@ -394,7 +400,9 @@ class Fenetre:
         file: queue.Queue[MessageFil] = queue.Queue()
         fil = threading.Thread(
             target=travailler,
-            args=(parametres, utilisateurs, file.put),
+            # `rejets` voyage jusqu'au fil : le plan en a besoin pour ne pas annoncer
+            # orphelin un compte dont la ligne a seulement été rejetée.
+            args=(parametres, utilisateurs, file.put, rejets),
             daemon=True,
         )
         self.lot_en_cours = True

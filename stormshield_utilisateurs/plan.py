@@ -3,11 +3,21 @@
 from collections import Counter
 from collections.abc import Sequence
 
-from stormshield_utilisateurs.modele import EtatBoitier, GroupeACreer, Plan, Utilisateur
+from stormshield_utilisateurs.modele import EtatBoitier, GroupeACreer, Plan, Rejet, Utilisateur
 
 
-def construire(utilisateurs: Sequence[Utilisateur], etat: EtatBoitier) -> Plan:
-    """L'outil ajoute et rien d'autre : il ne modifie ni ne supprime jamais l'existant."""
+def construire(
+    utilisateurs: Sequence[Utilisateur],
+    etat: EtatBoitier,
+    rejets: Sequence[Rejet] = (),
+) -> Plan:
+    """L'outil ajoute et rien d'autre : il ne modifie ni ne supprime jamais l'existant.
+
+    Les rejets comptent dans « ce qui est dans le fichier » : un compte présent sur le
+    boîtier dont la ligne a été rejetée y est bel et bien, et l'annoncer « orphelin »
+    dirait à l'opérateur le contraire de ce qu'il doit corriger. Ils ne comptent nulle
+    part ailleurs — ni à créer, ni ignorés, ni dans le décompte des membres d'un groupe.
+    """
     a_creer = tuple(
         utilisateur
         for utilisateur in utilisateurs
@@ -19,6 +29,7 @@ def construire(utilisateurs: Sequence[Utilisateur], etat: EtatBoitier) -> Plan:
         if utilisateur.identifiant in etat.utilisateurs
     )
     dans_le_fichier = {utilisateur.identifiant for utilisateur in utilisateurs}
+    dans_le_fichier.update(rejet.identifiant for rejet in rejets)
     orphelins = tuple(sorted(etat.utilisateurs - dans_le_fichier))
 
     # Les groupes à créer ne se comptent que sur les comptes à créer : un groupe

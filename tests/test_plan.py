@@ -4,7 +4,7 @@ from collections.abc import Iterable
 
 from fabriques import utilisateur
 
-from stormshield_utilisateurs.modele import EtatBoitier, PlancherPolitique
+from stormshield_utilisateurs.modele import EtatBoitier, PlancherPolitique, Rejet
 from stormshield_utilisateurs.plan import construire
 
 PLANCHER = PlancherPolitique(longueur_min=12, nombre_classes_min=3, entropie_min=0)
@@ -38,6 +38,33 @@ def test_compte_present_sur_le_boitier_est_ignore_entierement() -> None:
 def test_compte_du_boitier_absent_du_fichier_est_orphelin() -> None:
     plan = construire([utilisateur("dupont")], _etat(utilisateurs={"martin", "dupont"}))
     assert plan.orphelins == ("martin",)
+
+
+def test_un_compte_dont_la_ligne_a_ete_rejetee_n_est_pas_orphelin() -> None:
+    """« Orphelin » veut dire absent du fichier. Compter les seules lignes valides
+    faisait annoncer orphelin un compte dont la ligne n'a été que rejetée : message
+    trompeur sur tout lot comportant des rejets, et à l'opposé de la correction à faire."""
+    plan = construire(
+        [utilisateur("dupont")],
+        _etat(utilisateurs={"martin", "dupont", "legrand"}),
+        [Rejet(ligne=3, identifiant="legrand", motif="prenom vide")],
+    )
+    assert plan.orphelins == ("martin",)
+
+
+def test_une_ligne_rejetee_ne_cree_ni_compte_ni_groupe() -> None:
+    """Les rejets ne comptent que dans « ce qui est dans le fichier » : ni à créer, ni
+    ignorés, ni dans le décompte des membres d'un groupe."""
+    plan = construire(
+        [utilisateur("dupont", "compta")],
+        _etat(),
+        [Rejet(ligne=3, identifiant="legrand", motif="prenom vide")],
+    )
+    assert [compte.identifiant for compte in plan.comptes_a_creer] == ["dupont"]
+    assert plan.comptes_ignores == ()
+    assert [(groupe.nom, groupe.nombre_membres) for groupe in plan.groupes_a_creer] == [
+        ("compta", 1)
+    ]
 
 
 def test_orphelins_tries_pour_un_affichage_stable() -> None:

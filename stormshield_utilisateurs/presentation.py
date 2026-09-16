@@ -701,6 +701,7 @@ def travailler(
     parametres: Parametres,
     utilisateurs: Sequence[Utilisateur],
     publier: Publieur,
+    rejets: Sequence[Rejet] = (),
     fabriquer_boitier: Callable[[Connexion], Boitier] = boitier_de_la_connexion,
 ) -> None:
     """Corps du fil d'exécution : ne touche aucun widget, ne fait que publier.
@@ -725,6 +726,10 @@ def travailler(
             simulation=parametres.simulation,
             emettre=publier,
             confirmer=confirmer,
+            # Les lignes rejetées comptent dans « ce qui est dans le fichier » : sans
+            # elles, un compte du boîtier dont la ligne a été rejetée serait annoncé
+            # orphelin alors qu'il y figure bel et bien.
+            rejets=rejets,
         )
     except Exception as erreur:
         publier(message_de_fil(erreur))

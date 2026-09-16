@@ -23,6 +23,7 @@ from stormshield_utilisateurs.modele import (
     PlancherPolitique,
     PolitiqueMotDePasse,
     Rapport,
+    Rejet,
     Utilisateur,
 )
 
@@ -261,6 +262,7 @@ def executer(
     simulation: bool,
     emettre: Emetteur,
     confirmer: Confirmation,
+    rejets: Sequence[Rejet] = (),
     patience: Patience = PATIENCE_PAR_DEFAUT,
     generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str] = motdepasse.generer,
 ) -> Rapport:
@@ -295,7 +297,7 @@ def executer(
         if manquements:
             _arreter_politique(rapport, emettre, manquements, etat.plancher)
         else:
-            plan_courant = construction_plan.construire(utilisateurs, etat)
+            plan_courant = construction_plan.construire(utilisateurs, etat, rejets)
             compteur.fixer_total(
                 NOMBRE_LECTURES + (0 if simulation else plan_courant.nombre_operations())
             )
@@ -312,6 +314,7 @@ def executer(
                     utilisateurs,
                     etat,
                     plan_courant,
+                    rejets,
                     politique,
                     rapport,
                     compteur,
@@ -337,6 +340,7 @@ def _appliquer(
     utilisateurs: Sequence[Utilisateur],
     etat: EtatBoitier,
     plan_courant: Plan,
+    rejets: Sequence[Rejet],
     politique: PolitiqueMotDePasse,
     rapport: Rapport,
     compteur: _Compteur,
@@ -365,7 +369,7 @@ def _appliquer(
                 return
             # On ne rejoue jamais la commande interrompue : on relit et on replanifie.
             try:
-                reste = _replanifier(boitier, utilisateurs, etat, refuses)
+                reste = _replanifier(boitier, utilisateurs, etat, rejets, refuses)
             except ErreurFatale:
                 # Classe fille d'ErreurBoitier : à intercepter avant elle, sinon
                 # cette clause ne serait jamais atteinte.
@@ -456,7 +460,7 @@ def _arreter_politique(
 
 def _replanifier(
     boitier: Boitier, utilisateurs: Sequence[Utilisateur], etat: EtatBoitier,
-    refuses: _Refuses,
+    rejets: Sequence[Rejet], refuses: _Refuses,
 ) -> Plan:
     """Reprise en milieu de lot : seuls les comptes et les groupes sont relus.
 
@@ -466,7 +470,7 @@ def _replanifier(
     """
     comptes, groupes = lire_comptes_et_groupes(boitier)
     plan_reconstruit = construction_plan.construire(
-        utilisateurs, replace(etat, utilisateurs=comptes, groupes=groupes)
+        utilisateurs, replace(etat, utilisateurs=comptes, groupes=groupes), rejets
     )
     # Ce que le boîtier a refusé ne repart pas : le refus est déjà au rapport, et le
     # rejouer le compterait une fois de plus sans rien créer.
