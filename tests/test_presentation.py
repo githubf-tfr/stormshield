@@ -413,7 +413,7 @@ def test_un_compte_sans_mot_de_passe_n_a_aucun_secret_a_perdre() -> None:
 def test_l_ecriture_du_csv_solde_l_attente() -> None:
     enregistrables = ComptesEnregistrables()
     enregistrables.ajouter(CompteCree("dupont", "s3cr3t"))
-    enregistrables.marquer_enregistres()
+    enregistrables.marquer_enregistres(enregistrables.comptes)
     assert enregistrables.secrets_en_attente == 0
 
 
@@ -422,8 +422,35 @@ def test_un_compte_cree_apres_l_ecriture_du_csv_rouvre_l_attente() -> None:
     dans aucun fichier."""
     enregistrables = ComptesEnregistrables()
     enregistrables.ajouter(CompteCree("dupont", "s3cr3t"))
-    enregistrables.marquer_enregistres()
+    enregistrables.marquer_enregistres(enregistrables.comptes)
     enregistrables.ajouter(CompteCree("martin", "aut3r"))
+    assert enregistrables.secrets_en_attente == 1
+
+
+def test_un_compte_arrive_pendant_le_selecteur_de_fichier_n_est_pas_dit_ecrit() -> None:
+    """Tk fait tourner sa boucle d'événements pendant qu'un sélecteur de fichier est
+    ouvert : c'est ainsi qu'il attend. Les comptes créés pendant ce temps ne figurent
+    dans aucun fichier, et les compter comme écrits les ferait détruire sans question
+    au lancement suivant.
+    """
+    enregistrables = ComptesEnregistrables()
+    enregistrables.ajouter(CompteCree("a", "s3cr3t"))
+    ecrits = enregistrables.comptes
+    # Le fil continue pendant que la boîte est ouverte.
+    enregistrables.ajouter(CompteCree("b", "aut3r"))
+    enregistrables.marquer_enregistres(ecrits)
+    assert enregistrables.secrets_en_attente == 1
+
+
+def test_un_lot_relance_pendant_le_selecteur_de_fichier_ne_solde_rien() -> None:
+    """La liste écrite n'est plus celle qui est en mémoire : rien de ce lot-ci n'a été
+    écrit, et le marquage ne doit porter sur aucun de ses comptes."""
+    enregistrables = ComptesEnregistrables()
+    enregistrables.ajouter(CompteCree("a", "s3cr3t"))
+    ecrits = enregistrables.comptes
+    enregistrables.reinitialiser()
+    enregistrables.ajouter(CompteCree("b", "aut3r"))
+    enregistrables.marquer_enregistres(ecrits)
     assert enregistrables.secrets_en_attente == 1
 
 
@@ -431,7 +458,7 @@ def test_le_rapport_final_rouvre_l_attente() -> None:
     """`fixer` remplace la liste : ce qu'elle porte n'a pas été écrit sous cette forme."""
     enregistrables = ComptesEnregistrables()
     enregistrables.ajouter(CompteCree("dupont", "s3cr3t"))
-    enregistrables.marquer_enregistres()
+    enregistrables.marquer_enregistres(enregistrables.comptes)
     enregistrables.fixer([CompteCree("dupont", "s3cr3t")])
     assert enregistrables.secrets_en_attente == 1
 

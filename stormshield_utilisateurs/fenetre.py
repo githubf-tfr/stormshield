@@ -502,9 +502,10 @@ class Fenetre:
         except OSError as erreur:
             messagebox.showerror("Écriture impossible", str(erreur), parent=self.racine)
             return
-        # Marqué seulement ici : tant que le fichier n'est pas écrit, les secrets sont
-        # toujours en mémoire et un nouveau lot doit encore être confirmé.
-        self.enregistrables.marquer_enregistres()
+        # Marqué seulement ici, et seulement sur l'instantané réellement écrit : le
+        # sélecteur de fichier a fait tourner la boucle d'événements, et les comptes
+        # créés pendant ce temps ne sont dans aucun fichier.
+        self.enregistrables.marquer_enregistres(comptes)
         self._ecrire(ligne_d_enregistrement(comptes, chemin))
 
     # --- création de l'annuaire ------------------------------------------

@@ -368,13 +368,26 @@ class ComptesEnregistrables:
 
     def fixer(self, comptes: Sequence[CompteCree]) -> None:
         # Le rapport peut porter un mot de passe là où l'écriture en cours de lot avait
-        # vu un compte encore muet : rien de cette liste-ci n'est réputé écrit.
+        # vu un compte encore muet : rien de cette liste-ci n'est réputé écrit. Choix
+        # conservateur assumé — après la fin d'un lot, l'avertissement recompte les
+        # secrets déjà exportés en cours de route. Avertir deux fois coûte un clic ;
+        # ne pas avertir coûte des mots de passe qu'aucun relancement ne recrée.
         self._comptes = list(comptes)
         self._deja_ecrits = 0
 
-    def marquer_enregistres(self) -> None:
-        """À n'appeler qu'après une écriture de fichier réussie."""
-        self._deja_ecrits = len(self._comptes)
+    def marquer_enregistres(self, comptes: Sequence[CompteCree]) -> None:
+        """À n'appeler qu'après une écriture réussie, avec exactement ce qui a été écrit.
+
+        Tk fait tourner sa boucle d'événements pendant qu'un sélecteur de fichier est
+        ouvert : entre l'instantané confié à l'écriture et ce marquage, le fil a pu
+        créer d'autres comptes, le rapport final a pu remplacer la liste et un nouveau
+        lot a pu la vider. Seule une liste écrite qui est encore la tête de la liste en
+        mémoire solde quoi que ce soit ; tout le reste demeure en attente.
+        """
+        ecrits = list(comptes)
+        if self._comptes[: len(ecrits)] != ecrits:
+            return
+        self._deja_ecrits = len(ecrits)
 
     def reinitialiser(self) -> None:
         """Au démarrage effectif d'un lot : sans cela, un export mélangerait deux lots."""
