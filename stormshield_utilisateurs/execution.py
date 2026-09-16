@@ -261,10 +261,22 @@ def _appliquer(
                 _arreter(rapport, emettre, "liaison irrécupérable")
                 return
             # On ne rejoue jamais la commande interrompue : on relit et on replanifie.
+            operations_avant = reste.nombre_operations()
             try:
                 reste = _replanifier(boitier, utilisateurs, etat)
             except ErreurBoitier as erreur:
                 _arreter(rapport, emettre, f"relecture impossible ({erreur})")
+                return
+            # Seul un progrès autorise un tour de plus. Une écriture qui retombe
+            # durablement laisse un plan identique : reboucler dessus ferait tourner
+            # l'outil sans fin, à `delai` près, sans jamais rien créer de plus.
+            if reste.nombre_operations() >= operations_avant:
+                _arreter(
+                    rapport, emettre,
+                    "la reconnexion n'a fait progresser aucune écriture "
+                    f"({reste.nombre_operations()} opérations restantes, "
+                    f"{operations_avant} avant la coupure)",
+                )
                 return
             # Le plan a changé : le total aussi, sans quoi la barre viserait un total
             # qu'aucune opération restante ne peut plus atteindre.

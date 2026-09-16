@@ -353,6 +353,28 @@ def test_trois_reconnexions_infructueuses_puis_arret_net() -> None:
     assert any(isinstance(evenement, Termine) for evenement in evenements)
 
 
+def test_une_ecriture_qui_echoue_durablement_arrete_le_lot() -> None:
+    """La reconnexion et les relectures passent, mais l'écriture retombe : le plan
+    reconstruit est identique au précédent. Sans exigence de progrès, la boucle
+    tourne indéfiniment, à `delai` près."""
+    boitier = BoitierMemoire()
+    tentatives = 0
+
+    def couper_chaque_ecriture(operation: str, _cible: str) -> None:
+        nonlocal tentatives
+        if operation == "creer_utilisateur":
+            tentatives += 1
+            if tentatives > 5:
+                raise RuntimeError("boucle sans fin : le lot ne s'arrête jamais")
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_chaque_ecriture
+    rapport, evenements = _lancer(boitier, [_utilisateur("dupont")])
+    assert tentatives <= 2
+    assert rapport.interrompu is True
+    assert any(isinstance(evenement, Termine) for evenement in evenements)
+
+
 def test_relecture_impossible_apres_reconnexion_arrete_le_lot() -> None:
     """La liaison retombe pendant la relecture : arrêt net, jamais d'exception nue."""
     boitier = BoitierMemoire()
