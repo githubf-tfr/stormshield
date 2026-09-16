@@ -22,6 +22,11 @@ class ErreurReseau(ErreurBoitier):
     """La liaison est perdue : c'est le seul cas qui déclenche une reconnexion."""
 
 
+class ErreurFatale(ErreurBoitier):
+    """Erreur qu'une reconnexion ne résoudra jamais : authentification refusée,
+    second facteur requis, configuration incomplète. L'appelant doit s'arrêter."""
+
+
 class Boitier(Protocol):
     """Tout ce que l'outil sait demander à un firewall SNS, et rien de plus."""
 
