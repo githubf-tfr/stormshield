@@ -29,6 +29,7 @@ from stormshield_utilisateurs.execution import (
     Journal,
     PlanPret,
     PolitiqueLue,
+    PolitiqueRefusee,
     Progression,
     Termine,
 )
@@ -49,6 +50,7 @@ from stormshield_utilisateurs.presentation import (
     PompeEvenements,
     Publieur,
     libelle_plancher,
+    lignes_de_la_politique_refusee,
     lignes_du_fichier,
     lignes_du_plan,
     lignes_du_rapport,
@@ -258,6 +260,8 @@ class Fenetre:
         """Le CSV est lu ici, hors ligne, avant la moindre connexion."""
         chemin = Path(self.var_fichier.get().strip())
         try:
+            # Champs grisés tant qu'aucune lecture n'a eu lieu : c'est la politique de
+            # repli qui part, et le métier la refusera contre le plancher qu'il lira.
             politique = (
                 POLITIQUE_INITIALE if self.plancher is None else self._politique_des_champs()
             )
@@ -324,6 +328,13 @@ class Fenetre:
                 self._ecrire(texte)
             case PolitiqueLue(plancher):
                 self._accueillir_plancher(plancher)
+            case PolitiqueRefusee() as refus:
+                # Non terminal : le `Termine` qui suit réactivera le bouton *Lancer*.
+                lignes = lignes_de_la_politique_refusee(refus)
+                self._ecrire_lignes(lignes)
+                messagebox.showerror(
+                    "Politique refusée", "\n".join(lignes), parent=self.racine
+                )
             case PlanPret(plan):
                 self._ecrire_lignes(lignes_du_plan(plan))
             case Progression(accomplies, total):

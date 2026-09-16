@@ -26,6 +26,7 @@ from stormshield_utilisateurs.execution import (
     Journal,
     PlanPret,
     PolitiqueLue,
+    PolitiqueRefusee,
     Progression,
     Termine,
 )
@@ -50,6 +51,7 @@ from stormshield_utilisateurs.presentation import (
     PompeEvenements,
     est_terminal,
     libelle_plancher,
+    lignes_de_la_politique_refusee,
     lignes_du_fichier,
     lignes_du_plan,
     lignes_du_rapport,
@@ -248,17 +250,36 @@ def test_une_politique_sous_le_plancher_est_refusee_avant_tout_envoi() -> None:
     ]
 
 
-def test_une_ecriture_avant_toute_lecture_du_plancher_est_refusee() -> None:
-    """Sans plancher connu, « ne jamais descendre sous le plancher » n'est pas
-    vérifiable : l'écriture partirait sur une politique que rien n'a validée."""
-    obstacles = obstacles_au_lancement(parametres(simulation=False), plancher=None)
-    assert len(obstacles) == 1
-    assert "simulation" in obstacles[0]
+def test_un_premier_lot_reel_part_sans_simulation_prealable() -> None:
+    """Le métier refuse lui-même la politique contre le plancher du boîtier visé.
+
+    Il émet `PolitiqueRefusee` après `PolitiqueLue` et avant la moindre écriture :
+    exiger une simulation préalable ici n'apporterait plus rien et imposerait deux
+    lancements pour tout premier lot.
+    """
+    assert obstacles_au_lancement(parametres(simulation=False), plancher=None) == []
 
 
 def test_une_simulation_avant_toute_lecture_du_plancher_est_permise() -> None:
     """C'est précisément la simulation qui fait connaître le plancher."""
     assert obstacles_au_lancement(parametres(simulation=True), plancher=None) == []
+
+
+# --- politique refusée par le boîtier -------------------------------------
+
+
+def test_la_politique_refusee_porte_les_violations_mot_pour_mot() -> None:
+    """Le métier a déjà rendu ces textes : la fenêtre ne les reconstruit pas."""
+    refus = PolitiqueRefusee(("longueur 8 inférieure au minimum du boîtier (12)",), PLANCHER)
+    lignes = lignes_de_la_politique_refusee(refus)
+    assert "longueur 8 inférieure au minimum du boîtier (12)" in lignes
+    assert any("MinLength=12" in ligne for ligne in lignes)
+    assert any("aucun compte" in ligne for ligne in lignes)
+
+
+def test_la_politique_refusee_laisse_la_pompe_tourner() -> None:
+    """Un `Termine` suit toujours : c'est lui qui réactive le bouton *Lancer*."""
+    assert est_terminal(PolitiqueRefusee((), PLANCHER)) is False
 
 
 # --- comptes enregistrables -----------------------------------------------

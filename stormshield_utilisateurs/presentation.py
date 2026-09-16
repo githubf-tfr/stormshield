@@ -24,6 +24,7 @@ from stormshield_utilisateurs.execution import (
     Echoue,
     Evenement,
     Journal,
+    PolitiqueRefusee,
     Progression,
     Termine,
     creer_annuaire,
@@ -41,9 +42,9 @@ from stormshield_utilisateurs.modele import (
 
 PERIODE_POMPE_MS = 100
 
-# Politique de repli, valable le temps d'une seule simulation : tant que personne ne
-# s'est connecté, le plancher du boîtier est inconnu. `obstacles_au_lancement` interdit
-# d'écrire dans cet état, donc aucun mot de passe généré avec elle n'atteint un boîtier.
+# Politique de repli, le temps qu'une première lecture fasse connaître le plancher du
+# boîtier. Elle peut partir en lot réel : le métier la confronte au plancher qu'il vient
+# de lire et émet `PolitiqueRefusee` avant le moindre envoi si elle ne le tient pas.
 POLITIQUE_INITIALE = motdepasse.proposer(PlancherPolitique(0, 0, 0))
 
 
@@ -212,8 +213,11 @@ def obstacles_au_lancement(
 ) -> list[str]:
     """Ce qui empêche de lancer. Liste vide = le lot peut partir.
 
-    Un lot mal formé ne doit pas partir seul : tout est vérifié avant la moindre
-    connexion, et la politique avant le moindre envoi.
+    Un lot mal formé ne doit pas partir seul : tout ce qui se vérifie hors ligne l'est
+    ici, avant la moindre connexion. La politique n'est confrontée au plancher que s'il
+    est déjà connu d'une lecture antérieure — le verdict qui fait foi est celui du
+    métier, contre le plancher du boîtier réellement visé (`PolitiqueRefusee`), et il
+    tombe avant la moindre écriture. Un premier lot peut donc partir directement en réel.
     """
     obstacles: list[str] = []
     if not parametres.connexion.hote.strip():
@@ -224,18 +228,24 @@ def obstacles_au_lancement(
         obstacles.append("le mot de passe du compte d'administration n'est pas renseigné")
     if not str(parametres.fichier).strip() or parametres.fichier == Path():
         obstacles.append("aucun fichier CSV n'est désigné")
-    if plancher is None:
-        if not parametres.simulation:
-            # Sans plancher lu sur le boîtier, « ne jamais descendre sous le plancher »
-            # n'est pas vérifiable : les mots de passe partiraient sur une politique que
-            # rien n'a validée, et USER PASSWORD les refuserait un par un.
-            obstacles.append(
-                "le plancher de politique du boîtier n'est pas connu : lancez d'abord "
-                "une simulation, puis relancez sans la simulation"
-            )
-        return obstacles
-    obstacles.extend(motdepasse.violations(parametres.politique, plancher))
+    if plancher is not None:
+        obstacles.extend(motdepasse.violations(parametres.politique, plancher))
     return obstacles
+
+
+def lignes_de_la_politique_refusee(refus: PolitiqueRefusee) -> list[str]:
+    """Rendu du refus émis par le métier, avant toute écriture.
+
+    Les violations sont recopiées telles quelles : elles viennent de
+    `motdepasse.violations`, et les reformuler ici ferait diverger deux textes qui
+    doivent dire la même chose.
+    """
+    return [
+        "politique refusée avant tout envoi : aucun compte n'a été touché.",
+        *refus.violations,
+        libelle_plancher(refus.plancher),
+        "Durcissez la politique, puis relancez le lot.",
+    ]
 
 
 class ComptesEnregistrables:
