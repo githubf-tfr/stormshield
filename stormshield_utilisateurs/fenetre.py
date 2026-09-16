@@ -60,6 +60,7 @@ from stormshield_utilisateurs.presentation import (
     BoiteParLot,
     ComptesEnregistrables,
     Connexion,
+    DemandeConfirmation,
     IncidentInterface,
     MessageFil,
     Parametres,
@@ -467,6 +468,12 @@ class Fenetre:
                 )
             case PlanPret(plan):
                 self._ecrire_lignes(lignes_du_plan(plan))
+            case DemandeConfirmation() as demande:
+                # Jamais depuis l'intérieur d'un tour de pompe : une modale Tk fait
+                # tourner une boucle d'événements imbriquée, qui rappellerait ce tour
+                # dans lui-même. Le fil attend sa réponse, il a tout le temps — et le
+                # plan qu'il vient d'émettre est déjà à l'écran, sous la boîte.
+                self._planifier(0, lambda: self._repondre_a_la_demande(demande))
             case Progression(accomplies, total):
                 maximum, valeur = reglage_barre(message)
                 self.barre.configure(maximum=maximum, value=valeur)
@@ -493,6 +500,26 @@ class Fenetre:
                 # `AnnuaireCree` ne circule que sur la file du dialogue de création :
                 # ici, un message non reconnu est une anomalie, pas un cas de figure.
                 self._ecrire(ligne_de_message_inconnu(message))
+
+    def _repondre_a_la_demande(self, demande: DemandeConfirmation) -> None:
+        """Pose la question, puis débloque le fil — quoi qu'il arrive.
+
+        Le fil d'exécution est arrêté sur `attendre()` : une exception qui partirait
+        d'ici sans répondre le laisserait bloqué, bouton *Lancer* grisé, jusqu'à la
+        fermeture de la fenêtre. Le `finally` répond « non » dans ce cas : rien n'a
+        encore été écrit, et ne rien écrire est le côté sûr.
+        """
+        accorde = False
+        try:
+            accorde = messagebox.askyesno(
+                "Écrire sur le firewall",
+                demande.texte,
+                icon=messagebox.WARNING,
+                default=messagebox.NO,
+                parent=self.racine,
+            )
+        finally:
+            demande.repondre(accorde)
 
     def _accueillir_plancher(self, plancher: PlancherPolitique) -> None:
         premiere_lecture = self.politique is None

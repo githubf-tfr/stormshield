@@ -10,6 +10,7 @@ sont aiguillées sur leur classe.
 """
 
 import contextlib
+import threading
 import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -66,9 +67,45 @@ class AnnuaireCree:
     domaine: str
 
 
+class DemandeConfirmation:
+    """Le fil d'exécution demande l'autorisation d'écrire, et attend la réponse.
+
+    Seul message qui circule dans les deux sens. Le fil ne peut pas ouvrir de boîte de
+    dialogue — il ne touche aucun widget —, et la fenêtre ne peut pas décider à la place
+    de l'opérateur : le fil dépose cette demande dans la file et se bloque sur
+    `attendre()`, la fenêtre pose la question puis appelle `repondre()`.
+
+    Le fil est un démon : si la fenêtre disparaît sans répondre, il meurt avec
+    l'interpréteur plutôt que de rester bloqué au-delà de la session. Rien n'a alors été
+    écrit, puisque la demande précède la première commande d'écriture.
+    """
+
+    def __init__(self, plan: Plan, hote: str) -> None:
+        self.plan = plan
+        self.hote = hote
+        self._accorde = False
+        self._repondu = threading.Event()
+
+    @property
+    def texte(self) -> str:
+        """Ce que la fenêtre affiche telle quelle. Composé hors de tout widget."""
+        return texte_de_confirmation_du_lot(self.hote, self.plan)
+
+    def repondre(self, accorde: bool) -> None:
+        """À appeler une fois, depuis le fil de l'interface. Débloque le fil d'exécution."""
+        self._accorde = accorde
+        self._repondu.set()
+
+    def attendre(self) -> bool:
+        """Bloque le fil d'exécution jusqu'à la réponse. Vrai = les écritures partent."""
+        self._repondu.wait()
+        return self._accorde
+
+
 # Ce qui circule du fil d'exécution vers la fenêtre : les événements du métier, plus
-# les deux verdicts que seule la fenêtre sait traiter.
-MessageFil = Evenement | AnnuaireManquant | AnnuaireCree
+# les deux verdicts que seule la fenêtre sait traiter, et la demande d'autorisation
+# d'écrire — la seule à attendre une réponse.
+MessageFil = Evenement | AnnuaireManquant | AnnuaireCree | DemandeConfirmation
 Publieur = Callable[[MessageFil], None]
 
 # Rien ne suit un message terminal : la pompe s'arrête, le bouton Lancer se réactive.
@@ -474,6 +511,52 @@ def lignes_du_plan(plan: Plan) -> list[str]:
     return lignes
 
 
+def _groupes_a_un_seul_membre(plan: Plan) -> tuple[str, ...]:
+    return tuple(groupe.nom for groupe in plan.groupes_a_creer if groupe.nombre_membres == 1)
+
+
+def texte_de_confirmation_du_lot(hote: str, plan: Plan) -> str:
+    """Dernier arrêt avant la première écriture, et le seul.
+
+    L'outil demande confirmation pour perdre des mots de passe ; il la doit au moins
+    autant pour écrire sur un firewall. Le plan vient d'être affiché, mais il défile :
+    ce texte redit à l'opérateur ce qu'il s'apprête à faire, sur quel hôte, et combien
+    de comptes cela représente — pendant qu'il peut encore renoncer sans qu'aucune
+    commande ne soit partie.
+
+    Un groupe neuf à un seul membre est signalé à part : c'est la signature d'une
+    coquille de saisie dans la colonne des groupes, et un groupe fantôme créé sur le
+    boîtier ne s'annule pas depuis cet outil.
+    """
+    parties = [
+        f"Ce lot va écrire sur le firewall {hote}.",
+        f"{_accord(len(plan.comptes_a_creer), 'compte à créer', 'comptes à créer')}, "
+        f"{_accord(len(plan.groupes_a_creer), 'groupe neuf', 'groupes neufs')}.",
+    ]
+    if plan.groupes_a_creer:
+        details = ", ".join(
+            f"{groupe.nom} ({_accord(groupe.nombre_membres, 'membre')})"
+            for groupe in plan.groupes_a_creer
+        )
+        parties.append(f"Groupes à créer : {details}")
+    solitaires = _groupes_a_un_seul_membre(plan)
+    if solitaires:
+        sujet = (
+            "Un groupe neuf n'aurait qu'un seul membre"
+            if len(solitaires) == 1
+            else f"{len(solitaires)} groupes neufs n'auraient qu'un seul membre"
+        )
+        parties.append(
+            f"{sujet} ({', '.join(solitaires)}) : c'est le plus souvent la signature "
+            "d'une coquille de saisie dans la colonne des groupes."
+        )
+    parties.append(
+        "Rien n'a encore été écrit sur le firewall. Ce qui sera créé restera créé : "
+        "cet outil ne supprime rien.\n\nÉcrire maintenant ?"
+    )
+    return "\n\n".join(parties)
+
+
 def ligne_de_nouveau_lot(*, simulation: bool) -> str:
     """Sépare deux lancements dans un journal qui n'est jamais vidé.
 
@@ -619,6 +702,14 @@ def travailler(
     laisserait passer ne s'afficherait nulle part.
     """
     boitier = fabriquer_boitier(parametres.connexion)
+    hote = parametres.connexion.hote
+
+    def confirmer(plan: Plan) -> bool:
+        """Demande l'accord d'écrire, puis attend. Appelé depuis ce fil, jamais ailleurs."""
+        demande = DemandeConfirmation(plan, hote)
+        publier(demande)
+        return demande.attendre()
+
     try:
         executer(
             boitier,
@@ -626,6 +717,7 @@ def travailler(
             parametres.politique,
             simulation=parametres.simulation,
             emettre=publier,
+            confirmer=confirmer,
         )
     except Exception as erreur:
         publier(message_de_fil(erreur))

@@ -19,6 +19,7 @@ from stormshield_utilisateurs.execution import (
 )
 from stormshield_utilisateurs.modele import (
     MotifArret,
+    Plan,
     PlancherPolitique,
     PolitiqueMotDePasse,
     Rapport,
@@ -51,6 +52,7 @@ def _lancer(
     *,
     simulation: bool = False,
     generer: Callable[[PolitiqueMotDePasse], str] = lambda _politique: "MotDePasse1!",
+    confirmer: Callable[[Plan], bool] = lambda _plan: True,
 ) -> tuple[Rapport, list[Evenement]]:
     evenements: list[Evenement] = []
     rapport = executer(
@@ -59,6 +61,7 @@ def _lancer(
         POLITIQUE,
         simulation=simulation,
         emettre=evenements.append,
+        confirmer=confirmer,
         patience=PATIENCE,
         generer_mot_de_passe=generer,
     )
@@ -94,6 +97,50 @@ def test_creation_nominale_dans_l_ordre_attendu() -> None:
     assert boitier.mots_de_passe == {"dupont": "MotDePasse1!"}
     assert rapport.comptes_crees[0].identifiant == "dupont"
     assert rapport.groupes_crees == ["compta"]
+
+
+def test_un_lot_reel_demande_confirmation_sur_le_plan_avant_toute_ecriture() -> None:
+    """La confirmation est posée sur le plan déjà construit — comptes à créer et groupes
+    neufs compris — et avant la première commande d'écriture."""
+    boitier = BoitierMemoire()
+    vus: list[Plan] = []
+
+    def accorder(plan: Plan) -> bool:
+        # Aucune écriture ne doit avoir eu lieu quand la question se pose.
+        assert _ecritures(boitier) == []
+        vus.append(plan)
+        return True
+
+    _lancer(boitier, [_utilisateur("dupont", "compta_bis")], confirmer=accorder)
+    assert [compte.identifiant for compte in vus[0].comptes_a_creer] == ["dupont"]
+    assert [(groupe.nom, groupe.nombre_membres) for groupe in vus[0].groupes_a_creer] == [
+        ("compta_bis", 1)
+    ]
+    assert boitier.utilisateurs == ["dupont"]
+
+
+def test_un_refus_de_confirmation_n_envoie_rien() -> None:
+    """L'opérateur doit pouvoir renoncer : rien ne part, et le journal le dit."""
+    boitier = BoitierMemoire()
+    rapport, evenements = _lancer(
+        boitier, [_utilisateur("dupont", "compta")], confirmer=lambda _plan: False
+    )
+    assert _ecritures(boitier) == []
+    assert boitier.utilisateurs == []
+    assert rapport.comptes_crees == []
+    assert any("abandonné à la confirmation" in texte for texte in _textes(evenements))
+    assert isinstance(evenements[-1], Termine)
+
+
+def test_une_simulation_ne_demande_aucune_confirmation() -> None:
+    """Rien n'est écrit : il n'y a rien à confirmer, et une question de plus serait une
+    question à laquelle on répond sans lire."""
+    boitier = BoitierMemoire()
+
+    def interdite(_plan: Plan) -> bool:
+        raise AssertionError("aucune confirmation ne doit être demandée en simulation")
+
+    _lancer(boitier, [_utilisateur("dupont")], simulation=True, confirmer=interdite)
 
 
 def test_simulation_lit_mais_n_ecrit_pas() -> None:

@@ -47,6 +47,7 @@ from stormshield_utilisateurs.presentation import (
     BoiteParLot,
     ComptesEnregistrables,
     Connexion,
+    DemandeConfirmation,
     IncidentInterface,
     MessageFil,
     Parametres,
@@ -69,6 +70,7 @@ from stormshield_utilisateurs.presentation import (
     politique_a_afficher,
     reglage_barre,
     resume_de_l_incident,
+    texte_de_confirmation_du_lot,
     texte_de_demarrage_impossible,
     travailler,
     travailler_annuaire,
@@ -679,6 +681,108 @@ def test_un_plan_sans_groupe_ni_orphelin_n_annonce_ni_l_un_ni_l_autre() -> None:
     assert lignes_du_plan(plan) == ["dupont : à créer"]
 
 
+# --- confirmation avant écriture ------------------------------------------
+
+
+def _plan(
+    comptes: tuple[str, ...] = ("dupont",),
+    groupes: tuple[GroupeACreer, ...] = (),
+) -> Plan:
+    return Plan(
+        comptes_a_creer=tuple(utilisateur(identifiant) for identifiant in comptes),
+        comptes_ignores=(),
+        groupes_a_creer=groupes,
+        orphelins=(),
+        domaine="interne.local",
+    )
+
+
+def test_la_confirmation_nomme_l_hote_les_comptes_et_les_groupes_neufs() -> None:
+    """Le produit demandait confirmation pour perdre des mots de passe et pas pour écrire
+    sur un firewall : c'est cette asymétrie que ce texte corrige."""
+    texte = texte_de_confirmation_du_lot(
+        "firewall.local", _plan(("dupont", "martin"), (GroupeACreer("rh", 2),))
+    )
+    assert "firewall.local" in texte
+    assert "2 comptes à créer" in texte
+    assert "1 groupe neuf" in texte
+    assert "Groupes à créer : rh (2 membres)" in texte
+    assert "Écrire maintenant ?" in texte
+
+
+def test_la_confirmation_signale_un_groupe_neuf_a_un_seul_membre() -> None:
+    """Un groupe neuf à un membre est la signature d'une coquille de saisie, et un groupe
+    fantôme créé sur le boîtier ne s'annule pas depuis cet outil."""
+    texte = texte_de_confirmation_du_lot(
+        "firewall.local", _plan(("dupont",), (GroupeACreer("compta_bis", 1),))
+    )
+    assert "Un groupe neuf n'aurait qu'un seul membre (compta_bis)" in texte
+    assert "coquille de saisie" in texte
+
+
+def test_la_confirmation_accorde_le_signalement_a_plusieurs_groupes_solitaires() -> None:
+    texte = texte_de_confirmation_du_lot(
+        "firewall.local",
+        _plan(("dupont", "martin"), (GroupeACreer("compta_bis", 1), GroupeACreer("rh", 1))),
+    )
+    assert "2 groupes neufs n'auraient qu'un seul membre (compta_bis, rh)" in texte
+
+
+def test_la_confirmation_sans_groupe_neuf_ne_parle_pas_de_groupes() -> None:
+    texte = texte_de_confirmation_du_lot("firewall.local", _plan(("dupont",)))
+    assert "1 compte à créer, 0 groupe neuf." in texte
+    assert "Groupes à créer" not in texte
+    assert "seul membre" not in texte
+
+
+def test_la_demande_porte_son_texte_et_debloque_le_fil_sur_la_reponse() -> None:
+    """Seul message à circuler dans les deux sens : le fil ne peut pas ouvrir de boîte de
+    dialogue, la fenêtre ne peut pas décider à la place de l'opérateur."""
+    demande = DemandeConfirmation(_plan(("dupont",)), "firewall.local")
+    assert demande.texte == texte_de_confirmation_du_lot("firewall.local", demande.plan)
+    demande.repondre(True)
+    assert demande.attendre() is True
+    refus = DemandeConfirmation(_plan(("dupont",)), "firewall.local")
+    refus.repondre(False)
+    assert refus.attendre() is False
+
+
+def test_le_fil_demande_l_autorisation_avant_d_ecrire_et_respecte_le_refus() -> None:
+    """Le fil publie la demande, bloque, et n'écrit rien si la réponse est non."""
+    boitier = BoitierMemoire()
+    messages: list[MessageFil] = []
+
+    def publier(message: MessageFil) -> None:
+        messages.append(message)
+        if isinstance(message, DemandeConfirmation):
+            assert boitier.utilisateurs == []
+            message.repondre(False)
+
+    travailler(
+        parametres(simulation=False),
+        [utilisateur("dupont")],
+        publier,
+        fabriquer_boitier=lambda _: boitier,
+    )
+    demandes = [message for message in messages if isinstance(message, DemandeConfirmation)]
+    assert len(demandes) == 1
+    assert demandes[0].hote == "firewall.local"
+    assert boitier.utilisateurs == []
+
+
+def test_le_fil_n_ecrit_qu_une_fois_l_autorisation_donnee() -> None:
+    boitier = BoitierMemoire()
+    messages, publier = collecter()
+    travailler(
+        parametres(simulation=False),
+        [utilisateur("dupont")],
+        publier,
+        fabriquer_boitier=lambda _: boitier,
+    )
+    assert any(isinstance(message, DemandeConfirmation) for message in messages)
+    assert boitier.utilisateurs == ["dupont"]
+
+
 def test_le_rapport_resume_puis_detaille_les_echecs() -> None:
     rapport = Rapport(
         comptes_crees=[CompteCree("dupont", "s3cr3t")],
@@ -746,9 +850,17 @@ def test_un_rapport_sans_compte_sans_mot_de_passe_n_ouvre_pas_la_section() -> No
 # --- fil d'exécution ------------------------------------------------------
 
 
-def collecter() -> tuple[list[MessageFil], Callable[[MessageFil], None]]:
+def collecter(*, accorder: bool = True) -> tuple[list[MessageFil], Callable[[MessageFil], None]]:
+    """Publieur de test. Il répond aux demandes de confirmation, faute de quoi le fil
+    resterait bloqué sur `attendre()` — c'est le rôle que tient la fenêtre en production."""
     messages: list[MessageFil] = []
-    return messages, messages.append
+
+    def publier(message: MessageFil) -> None:
+        messages.append(message)
+        if isinstance(message, DemandeConfirmation):
+            message.repondre(accorder)
+
+    return messages, publier
 
 
 def test_une_simulation_lit_le_boitier_et_n_y_ecrit_rien() -> None:

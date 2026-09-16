@@ -204,6 +204,15 @@ Evenement = (
 )
 Emetteur = Callable[[Evenement], None]
 
+# Autorisation d'écrire, demandée une fois le plan connu et avant la première commande
+# d'écriture. Rend faux quand l'opérateur renonce : rien n'est alors envoyé au boîtier.
+Confirmation = Callable[[Plan], bool]
+
+ABANDON_A_LA_CONFIRMATION = (
+    "lot abandonné à la confirmation : aucune écriture n'a été tentée, "
+    "rien n'a été envoyé au boîtier."
+)
+
 
 @dataclass
 class _Refuses:
@@ -244,6 +253,7 @@ def executer(
     *,
     simulation: bool,
     emettre: Emetteur,
+    confirmer: Confirmation,
     patience: Patience = PATIENCE_PAR_DEFAUT,
     generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str] = motdepasse.generer,
 ) -> Rapport:
@@ -251,6 +261,11 @@ def executer(
 
     La connexion et la lecture ont lieu dans les deux modes : sans elles l'outil
     ne pourrait pas dire « déjà présent ».
+
+    `confirmer` est exigé et sans valeur par défaut : un lot réel ne part qu'après un
+    accord explicite, donné sur le plan qui vient d'être lu. Une valeur par défaut qui
+    voudrait dire « oui » serait une trappe — l'appelant qui l'oublierait écrirait sur
+    le firewall sans que personne n'ait rien vu.
     """
     rapport = Rapport()
     compteur = _Compteur(emettre)
@@ -280,7 +295,11 @@ def executer(
             for _ in range(NOMBRE_LECTURES):
                 compteur.avancer()
             emettre(PlanPret(plan_courant))
-            if not simulation:
+            # Le plan est émis avant la demande : l'opérateur décide en le voyant à
+            # l'écran, et non pendant que les comptes partent.
+            if not simulation and not confirmer(plan_courant):
+                emettre(Journal(ABANDON_A_LA_CONFIRMATION))
+            elif not simulation:
                 _appliquer(
                     boitier,
                     utilisateurs,
