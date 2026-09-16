@@ -214,10 +214,9 @@ Les champs de politique restent grisés tant qu'aucune connexion n'a renseigné 
 boîtier : on ne propose pas un réglage dont on ignore le plancher. Ils s'activent donc au
 premier *Lancer*, une fois `CONFIG PASSWDPOLICY SHOW` lu.
 
-Régler la politique suppose ainsi un premier lancement, que la case Simulation rend sans
-conséquence : premier *Lancer* en simulation, l'opérateur lit le plan et durcit s'il le
-souhaite, décoche Simulation, relance. Ce détour est voulu — il force la lecture du plan avant
-toute écriture.
+Régler la politique suppose ainsi un premier lancement — en simulation ou en réel, peu
+importe : un premier lot réel n'exige plus de simulation préalable, une boîte de confirmation
+affichant le plan précédant désormais toute écriture.
 
 Le bouton *Enregistrer les mots de passe…* reste inactif tant qu'aucun compte n'a été créé ; il
 s'active dès la première création, avec ou sans mot de passe.

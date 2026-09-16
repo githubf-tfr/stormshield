@@ -88,8 +88,11 @@ La case **Simulation est cochée par défaut**. Cochée, l'outil se connecte, li
 affiche le plan complet — comptes à créer, groupes à créer, comptes ignorés, orphelins —
 mais **n'écrit rien**.
 
-La marche à suivre : lancer une première fois en simulation, lire le plan, puis décocher
-Simulation et relancer. Un lot mal formé ne doit pas partir seul.
+Simulation permet de relire le plan avant de se décider, mais un premier lancement en réel
+n'est pas bloqué : avant tout lot réel, une boîte de confirmation nomme l'hôte visé, le
+nombre de comptes à créer et les groupes neufs — en signalant ceux qui n'auraient qu'un seul
+membre, signature d'une coquille de saisie dans la colonne des groupes. Rien n'est encore
+écrit à ce moment : l'opérateur peut renoncer.
 
 ## Mots de passe
 
