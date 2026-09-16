@@ -539,15 +539,26 @@ FERMETURE_PENDANT_CREATION = (
 )
 
 
-def avertissement_de_fermeture(*, lot_en_cours: bool, secrets_en_attente: int) -> str | None:
+def avertissement_de_fermeture(
+    *, lot_en_cours: bool, creation_annuaire_en_cours: bool, secrets_en_attente: int
+) -> str | None:
     """Ce que fermer la fenêtre ferait perdre. None = il n'y a rien à perdre.
 
-    Le fil est un démon : il meurt avec l'interpréteur, où qu'il en soit — y compris
-    entre la création d'un compte et la pose de son mot de passe.
+    Les fils sont des démons : ils meurent avec l'interpréteur, où qu'ils en soient —
+    entre la création d'un compte et la pose de son mot de passe, ou pendant la
+    création de l'annuaire. Les trois drapeaux sont exigés : en oublier un rendrait la
+    fenêtre muette là où elle doit le plus parler.
     """
-    if not lot_en_cours and not secrets_en_attente:
+    if not lot_en_cours and not creation_annuaire_en_cours and not secrets_en_attente:
         return None
     parties: list[str] = []
+    if creation_annuaire_en_cours:
+        parties.append(
+            "Une création d'annuaire LDAP interne est en cours : CONFIG LDAP INITIALIZE "
+            "est déjà parti sur le boîtier et ne s'annule pas. Fermer maintenant ne "
+            "l'arrête pas, mais vous n'en verrez jamais le verdict — et cette opération "
+            "ne se refait pas."
+        )
     if lot_en_cours:
         parties.append(
             "Un lot est en cours sur le firewall. Fermer maintenant coupe le travail "

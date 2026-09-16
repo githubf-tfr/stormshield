@@ -125,6 +125,11 @@ class Fenetre:
         # Vrai entre le démarrage d'un fil de lot et son message terminal : c'est ce
         # que l'opérateur perdrait en fermant la fenêtre.
         self.lot_en_cours = False
+        # Vrai entre le démarrage du fil de création d'annuaire et son message terminal.
+        # Attribut de la fenêtre et non fermeture du dialogue : le garde de fermeture de
+        # la fenêtre principale doit le connaître, `CONFIG LDAP INITIALIZE` étant
+        # l'opération la plus destructrice du produit.
+        self.creation_annuaire_en_cours = False
         # None tant qu'aucune connexion n'a renseigné le plancher du boîtier : c'est
         # ce qui grise les champs de politique et interdit d'écrire.
         self.politique: PolitiqueMotDePasse | None = None
@@ -573,10 +578,9 @@ class Fenetre:
         bouton = ttk.Button(cadre, text="Créer l'annuaire")
         bouton.grid(row=6, column=0, sticky="w", padx=6, pady=3)
 
-        # Vrai entre le démarrage du fil de création et son message terminal. La pompe
-        # est planifiée sur la fenêtre principale : elle survit au dialogue et
-        # délivrerait ses messages à des widgets détruits.
-        creation_en_cours = False
+        # `self.creation_annuaire_en_cours` porte l'état de ce fil : la pompe est
+        # planifiée sur la fenêtre principale, elle survit au dialogue, et fermer la
+        # fenêtre principale pendant la création doit aussi demander confirmation.
 
         def oublier_les_saisies() -> None:
             """Le secret de cn=StormshieldAdmin ne survit pas au dialogue : sans cela il
@@ -585,7 +589,7 @@ class Fenetre:
                 variable.set("")
 
         def fermer() -> None:
-            if creation_en_cours:
+            if self.creation_annuaire_en_cours:
                 messagebox.showwarning(
                     "Création en cours", FERMETURE_PENDANT_CREATION, parent=dialogue
                 )
@@ -594,10 +598,9 @@ class Fenetre:
             dialogue.destroy()
 
         def appliquer(message: MessageFil) -> None:
-            nonlocal creation_en_cours
             match message:
                 case AnnuaireCree(domaine):
-                    creation_en_cours = False
+                    self.creation_annuaire_en_cours = False
                     self._ecrire(f"annuaire {domaine} créé et activé")
                     oublier_les_saisies()
                     dialogue.destroy()
@@ -609,7 +612,7 @@ class Fenetre:
                 case Journal(texte):
                     self._ecrire(texte)
                 case Echoue(texte):
-                    creation_en_cours = False
+                    self.creation_annuaire_en_cours = False
                     self._ecrire(texte)
                     # Le dialogue peut avoir disparu : le refus se dit alors sur la
                     # fenêtre principale, il ne doit pas se perdre.
@@ -622,7 +625,6 @@ class Fenetre:
                     self._ecrire(ligne_de_message_inconnu(message))
 
         def creer() -> None:
-            nonlocal creation_en_cours
             annuaire = ParametresAnnuaire(
                 domainname=var_domainname.get().strip(),
                 organisation=var_organisation.get().strip(),
@@ -651,7 +653,7 @@ class Fenetre:
             # jusqu'au fil, pas même le temps d'un appel.
             session = self._connexion_des_champs()
             file: queue.Queue[MessageFil] = queue.Queue()
-            creation_en_cours = True
+            self.creation_annuaire_en_cours = True
             threading.Thread(
                 target=travailler_annuaire,
                 args=(session, annuaire, file.put),
@@ -678,6 +680,7 @@ class Fenetre:
         """
         avertissement = avertissement_de_fermeture(
             lot_en_cours=self.lot_en_cours,
+            creation_annuaire_en_cours=self.creation_annuaire_en_cours,
             secrets_en_attente=self.enregistrables.secrets_en_attente,
         )
         if avertissement is not None and not messagebox.askyesno(
