@@ -33,7 +33,7 @@ Tenu à la main.
 ## À faire
 
 - **Exécuter `docs/recette/2026-09-16-cahier-recette-v1.md` dès qu'un boîtier est
-  joignable.** 102 cas, dont 21 jouables sans boîtier sur un poste Windows et le `.exe` de
+  joignable.** 112 cas, dont 21 jouables sans boîtier sur un poste Windows et le `.exe` de
   la release. C'est la seule couverture de `fenetre.py` et le seul moyen de confirmer les
   hypothèses de `boitier_sdk.py` (section F du cahier).
 - Poser le tag `v1.0.0` pour déclencher la première construction du `.exe`. Le workflow
@@ -87,7 +87,7 @@ Modules livrés, du plus pur au plus impur :
 | `fenetre` | Seul module à importer `tkinter`, et le seul qu'aucun test n'importe |
 | `__main__` | Point d'entrée, cible de PyInstaller, filet de démarrage |
 
-- **243 tests** passent (marqueur `firewall` exclu), `ruff` et `mypy` verts, aucun
+- **273 tests** passent (marqueur `firewall` exclu), `ruff` et `mypy` verts, aucun
   `# type: ignore`.
 - Workflows : `qualite.yml` (`ruff`, `mypy`, `pytest` en matrice 3.11 / 3.12) et `exe.yml`
   (PyInstaller `--onefile --windowed` sur `windows-latest`, release sur tag `v*`).

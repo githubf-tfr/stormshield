@@ -13,7 +13,7 @@ Deux modules entiers du produit n'ont **jamais été exécutés** :
   SDK réellement installé, mais **il n'a jamais parlé à un vrai boîtier**. Plusieurs de ses
   choix sont des hypothèses, listées en section F ; elles se confirment ou se démentent ici.
 
-Les tests unitaires (231, marqueur `firewall` exclu) prouvent que le code fait ce qui a été
+Les tests unitaires (273, marqueur `firewall` exclu) prouvent que le code fait ce qui a été
 écrit. Ce cahier prouve que le produit fait ce qu'on attend. Les cas déjà couverts en
 unitaire y figurent donc **volontairement**.
 
