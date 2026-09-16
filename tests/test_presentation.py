@@ -782,29 +782,134 @@ def test_le_module_de_presentation_n_importe_pas_tkinter() -> None:
     assert [nom for nom in importes if nom.partition(".")[0] == "tkinter"] == []
 
 
-def test_les_fils_lances_par_la_fenetre_ne_peuvent_toucher_aucun_widget() -> None:
-    """La règle « le fil ne touche jamais un widget » est vérifiée par construction.
-
-    Chaque `threading.Thread` de la fenêtre vise une fonction de `presentation`, module
-    où `tkinter` est interdit par le test ci-dessus. Une fonction de `Fenetre` passée en
-    cible rouvrirait la porte, et aucun test ne pourrait plus la refermer : le fil n'a
-    pas d'appelant, et Tk ne signale pas toujours un widget touché hors de son fil.
-    """
-    source = Path(presentation.__file__).with_name("fenetre.py")
-    arbre = _arbre(str(source))
-    venus_de_presentation = {
+def _venus_de_presentation(arbre: ast.Module) -> set[str]:
+    return {
         alias.asname or alias.name
         for noeud in ast.walk(arbre)
         if isinstance(noeud, ast.ImportFrom)
         and noeud.module == "stormshield_utilisateurs.presentation"
         for alias in noeud.names
     }
-    cibles: list[str] = []
+
+
+def _noms_de_thread(arbre: ast.Module) -> set[str]:
+    """Toutes les façons dont `threading.Thread` peut être nommé dans ce source.
+
+    Se fier au seul `threading.Thread` laissait passer un `from threading import Thread`
+    suivi d'un `Thread(...)` : la règle ne doit pas dépendre du style d'import.
+    """
+    noms: set[str] = set()
     for noeud in ast.walk(arbre):
-        if not isinstance(noeud, ast.Call) or ast.unparse(noeud.func) != "threading.Thread":
-            continue
-        argument = next((mot for mot in noeud.keywords if mot.arg == "target"), None)
-        assert argument is not None, "un fil sans `target=` nommé échappe à ce garde-fou"
-        cibles.append(ast.unparse(argument.value))
-    assert cibles, "la fenêtre doit lancer son travail dans un fil"
-    assert set(cibles) <= venus_de_presentation
+        if isinstance(noeud, ast.Import):
+            noms.update(
+                f"{alias.asname or alias.name}.Thread"
+                for alias in noeud.names
+                if alias.name == "threading"
+            )
+        elif isinstance(noeud, ast.ImportFrom) and noeud.module == "threading":
+            noms.update(
+                alias.asname or alias.name for alias in noeud.names if alias.name == "Thread"
+            )
+    return noms
+
+
+def _mentionne_self(expression: ast.expr) -> bool:
+    return any(
+        isinstance(noeud, ast.Name) and noeud.id == "self" for noeud in ast.walk(expression)
+    )
+
+
+def _appels_de_fil(arbre: ast.Module, noms: set[str]) -> list[ast.Call]:
+    return [
+        noeud
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.Call)
+        and (ast.unparse(noeud.func) in noms or ast.unparse(noeud.func).endswith(".Thread"))
+    ]
+
+
+def _fils_qui_pourraient_toucher_un_widget(source: str) -> list[str]:
+    """Un motif d'infraction par fil douteux. Liste vide = aucun fil ne peut nuire.
+
+    Vérifie la cible *et* ce qu'on lui passe : `args` porte le publieur, c'est-à-dire
+    précisément ce que le fil appelle en boucle, et ce publieur-là touche le journal,
+    la barre, les boutons et ouvre des boîtes de dialogue. Une cible propre avec une
+    méthode de la fenêtre dans `args` est exactement aussi dangereuse qu'une mauvaise
+    cible.
+    """
+    arbre = ast.parse(source)
+    venus = _venus_de_presentation(arbre)
+    infractions: list[str] = []
+    for appel in _appels_de_fil(arbre, _noms_de_thread(arbre)):
+        if appel.args:
+            infractions.append("fil construit avec des arguments positionnels")
+        cible = next((mot for mot in appel.keywords if mot.arg == "target"), None)
+        if cible is None:
+            infractions.append("fil sans target= nommé")
+        elif ast.unparse(cible.value) not in venus:
+            infractions.append(f"cible hors de presentation : {ast.unparse(cible.value)}")
+        infractions.extend(
+            f"{mot.arg}= mentionne self : {ast.unparse(mot.value)}"
+            for mot in appel.keywords
+            if _mentionne_self(mot.value)
+        )
+    return infractions
+
+
+def test_aucun_fil_de_la_fenetre_ne_peut_toucher_un_widget() -> None:
+    """La règle « le fil ne touche jamais un widget » est vérifiée par construction.
+
+    Chaque fil vise une fonction de `presentation`, module où `tkinter` est interdit par
+    le test ci-dessus, et ne reçoit rien qui vienne de `self`. Le fil n'a pas d'appelant,
+    et Tk ne signale pas toujours un widget touché hors de son fil : ce qui passerait ici
+    ne se verrait qu'en recette, un jour de coupure réseau.
+    """
+    source = Path(presentation.__file__).with_name("fenetre.py").read_text(encoding="utf-8")
+    assert _fils_qui_pourraient_toucher_un_widget(source) == []
+    assert _appels_de_fil(ast.parse(source), _noms_de_thread(ast.parse(source))), (
+        "la fenêtre doit lancer son travail dans un fil"
+    )
+
+
+# Sources de sabotage : ce que le garde-fou doit refuser. Jamais importés, seulement
+# analysés — ils prouvent que le garde-fou mord, au lieu de le supposer.
+_FIL_SAIN = """
+import threading
+from stormshield_utilisateurs.presentation import travailler
+
+class Fenetre:
+    def _demarrer(self, parametres, utilisateurs):
+        file = queue.Queue()
+        threading.Thread(
+            target=travailler, args=(parametres, utilisateurs, file.put), daemon=True
+        ).start()
+"""
+
+
+def test_le_garde_fou_laisse_passer_un_fil_sain() -> None:
+    assert _fils_qui_pourraient_toucher_un_widget(_FIL_SAIN) == []
+
+
+def test_le_garde_fou_refuse_un_publieur_pris_sur_la_fenetre() -> None:
+    """Cible inchangée, publieur de la fenêtre dans `args` : c'est le trou qui compte."""
+    sabotage = _FIL_SAIN.replace("file.put", "self._appliquer")
+    infractions = _fils_qui_pourraient_toucher_un_widget(sabotage)
+    assert any("mentionne self" in infraction for infraction in infractions)
+
+
+def test_le_garde_fou_refuse_un_thread_importe_directement() -> None:
+    """La détection ne doit pas dépendre de la façon dont `Thread` a été importé."""
+    sabotage = _FIL_SAIN.replace("import threading", "from threading import Thread").replace(
+        "threading.Thread(", "Thread("
+    ).replace("target=travailler", "target=self._appliquer")
+    infractions = _fils_qui_pourraient_toucher_un_widget(sabotage)
+    assert any("cible hors de presentation" in infraction for infraction in infractions)
+    assert any("mentionne self" in infraction for infraction in infractions)
+
+
+def test_le_garde_fou_refuse_un_fil_sans_target_nomme() -> None:
+    sabotage = _FIL_SAIN.replace("target=travailler,", "travailler,")
+    assert _fils_qui_pourraient_toucher_un_widget(sabotage) == [
+        "fil construit avec des arguments positionnels",
+        "fil sans target= nommé",
+    ]

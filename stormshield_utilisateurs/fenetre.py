@@ -582,10 +582,13 @@ class Fenetre:
                 )
                 return
             bouton.configure(state=tk.DISABLED)
+            # Champs lus ici, dans le fil de l'interface : rien de `self` ne voyage
+            # jusqu'au fil, pas même le temps d'un appel.
+            session = self._connexion_des_champs()
             file: queue.Queue[MessageFil] = queue.Queue()
             threading.Thread(
                 target=travailler_annuaire,
-                args=(self._connexion_des_champs(), annuaire, file.put),
+                args=(session, annuaire, file.put),
                 daemon=True,
             ).start()
             self._pomper(file, appliquer)
