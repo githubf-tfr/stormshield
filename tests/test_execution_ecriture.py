@@ -295,6 +295,9 @@ def test_coupure_entre_la_creation_et_le_mot_de_passe_laisse_une_trace() -> None
         echec.identifiant == "dupont" and echec.operation == "USER PASSWORD"
         for echec in rapport.echecs
     )
+    # Le lot ne peut pas se déclarer réussi : le rapport porte l'échec et le compte
+    # à reprendre à la main.
+    assert rapport.echecs != []
     creations = [
         evenement for evenement in evenements if isinstance(evenement, CreationReussie)
     ]
