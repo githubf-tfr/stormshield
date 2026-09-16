@@ -27,6 +27,18 @@ class AnnuaireAbsent(Exception):
     """Aucun annuaire interne : c'est le seul cas où CONFIG LDAP INITIALIZE est atteignable."""
 
 
+class AnnuaireDejaPresent(Exception):
+    """Un annuaire répond déjà : CONFIG LDAP INITIALIZE écraserait sa base."""
+
+    def __init__(self, annuaires: tuple[str, ...]) -> None:
+        self.annuaires = annuaires
+        super().__init__(
+            "le boîtier déclare déjà un annuaire LDAP interne : "
+            + ", ".join(annuaires)
+            + ". L'initialisation écraserait sa base, elle est refusée."
+        )
+
+
 class AnnuairesMultiples(Exception):
     """Plusieurs annuaires : arrêt net, aucune écriture. USER GROUP CREATE ne sait
     pas viser un annuaire, les groupes partiraient on ne sait où."""
@@ -74,7 +86,15 @@ def lire_comptes_et_groupes(boitier: Boitier) -> tuple[frozenset[str], frozenset
 def creer_annuaire(
     boitier: Boitier, domainname: str, organisation: str, dc: str, mot_de_passe: str
 ) -> None:
-    """Chemin conditionnel, atteignable seulement après AnnuaireAbsent. Ne se refait pas."""
+    """Chemin conditionnel, atteignable seulement après AnnuaireAbsent. Ne se refait pas.
+
+    `CONFIG LDAP INITIALIZE` écrase la base d'un annuaire existant : la fonction
+    revérifie elle-même qu'aucun annuaire ne répond. Une protection qui repose sur
+    la discipline de l'appelant n'en est pas une.
+    """
+    existants = boitier.lister_annuaires()
+    if existants:
+        raise AnnuaireDejaPresent(tuple(existants))
     boitier.initialiser_annuaire(domainname, organisation, dc, mot_de_passe)
     boitier.activer_annuaire()
     if domainname not in boitier.lister_annuaires():
