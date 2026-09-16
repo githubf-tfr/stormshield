@@ -65,14 +65,21 @@ DELAI_ATTENTE_PAR_DEFAUT = 30.0
 # laissait donc passer « password%3DSECRET ». Les deux formes sont couvertes, sans
 # distinction de casse (quote() majuscule les chiffres hexadécimaux, pas toutes les
 # bibliothèques).
-_MOTIF_MOT_DE_PASSE = re.compile(r"(password)(=|%3D)\S*", re.IGNORECASE)
+#
+# Le masquage va jusqu'à la fin de la chaîne (`.*` avec DOTALL, pas `\S*`) : dans les
+# commandes concernées, le mot de passe est le dernier argument, et rien n'y contraint
+# l'espace — `USER PASSWORD` l'exclut de son générateur, mais `CONFIG LDAP INITIALIZE` reçoit
+# celui de `cn=StormshieldAdmin`, saisi par l'opérateur. S'arrêter au premier blanc ne
+# masquait alors qu'un fragment (« password=mot de passe » devenait « password=*** de
+# passe »). Masquer trop est sans conséquence ; masquer trop peu est une fuite.
+_MOTIF_MOT_DE_PASSE = re.compile(r"(password)(=|%3D).*", re.IGNORECASE | re.DOTALL)
 
 
 def _sans_secret(texte: str) -> str:
-    """Neutralise tout `password=...` — encodé ou non — avant qu'un texte ne figure dans une
-    trace ou un message d'erreur. S'applique aussi bien à la commande émise (`USER PASSWORD`,
-    `CONFIG LDAP INITIALIZE`) qu'au message de l'exception levée par le SDK, qui porte l'URL
-    complète et donc le secret encodé.
+    """Neutralise tout `password=...` — encodé ou non, jusqu'à la fin de la chaîne — avant
+    qu'un texte ne figure dans une trace ou un message d'erreur. S'applique aussi bien à la
+    commande émise (`USER PASSWORD`, `CONFIG LDAP INITIALIZE`) qu'au message de l'exception
+    levée par le SDK, qui porte l'URL complète et donc le secret encodé.
     """
     return _MOTIF_MOT_DE_PASSE.sub(r"\1\2***", texte)
 
@@ -262,11 +269,14 @@ class BoitierSDK:
             ) from erreur
 
     def deconnecter(self) -> None:
-        """Ne lève jamais. Une déconnexion s'appelle presque toujours depuis un `finally` :
-        si elle levait, son exception remplacerait l'erreur en cours et la vraie cause de
-        l'arrêt serait perdue. Un logout raté est cosmétique — la session expirera d'elle-même
-        côté boîtier ; décider qu'il interrompt le lot appartient à l'appelant, pas à
-        l'adaptateur."""
+        """N'absorbe que les familles attendues (`_ERREURS_ATTENDUES`) : une `AttributeError`,
+        une `RuntimeError`, une `ValueError` nue ou un `KeyboardInterrupt` remontent tels
+        quels — un bug de l'adaptateur ne doit pas se déguiser en simple échec de
+        déconnexion. Une déconnexion s'appelle presque toujours depuis un `finally` : si une
+        erreur attendue levait, son exception remplacerait celle en cours et la vraie cause de
+        l'arrêt serait perdue. Un logout raté, parmi les erreurs attendues, est cosmétique —
+        la session expirera d'elle-même côté boîtier ; décider qu'il interrompt le lot
+        appartient à l'appelant, pas à l'adaptateur."""
         client, self._client = self._client, None
         if client is None:
             return

@@ -14,7 +14,7 @@ from stormshield.sns.sslclient import (
     TOTPNeededError,
 )
 
-from stormshield_utilisateurs.boitier import Boitier, ErreurFatale, ErreurReseau
+from stormshield_utilisateurs.boitier import Boitier, ErreurCommande, ErreurFatale, ErreurReseau
 from stormshield_utilisateurs.boitier_sdk import (
     BoitierSDK,
     _lignes,
@@ -38,18 +38,33 @@ def _conformite_au_protocol(adaptateur: BoitierSDK) -> Boitier:
 class _ReponseFactice:
     """Réponse du SDK reconstituée : `ConfigParser` est celui du SDK installé, appliqué au
     texte `output` que produit `format_output`. Les types de `.data` sont donc les vrais
-    (`CaseInsensitiveDict`), pas des `dict` de test qui masqueraient le défaut."""
+    (`CaseInsensitiveDict`), pas des `dict` de test qui masqueraient le défaut.
 
-    def __init__(self, sortie: str) -> None:
+    `ret`, `msg` et `__bool__` sont fournis à part : `ConfigParser` les jette avec la ligne
+    d'en-tête (il n'en tire que `format`), alors que c'est `ret` que `Response.__bool__` du
+    vrai SDK teste pour décider d'un échec. Un double sans cette logique répondrait toujours
+    vrai à `bool(...)`, et la branche `ErreurCommande` de l'adaptateur ne serait prouvée par
+    aucun test hors ligne."""
+
+    def __init__(self, sortie: str, ret: int = 100, msg: str = "Ok") -> None:
         analyseur = ConfigParser(sortie)
         self.data: Any = analyseur.data
         self.format: str = analyseur.format
+        self.ret = ret
+        self.msg = msg
+
+    def __bool__(self) -> bool:
+        return 100 <= self.ret < 200
 
 
-def _reponse_section_line(titre: str, lignes: list[str]) -> _ReponseFactice:
+def _reponse_section_line(
+    titre: str, lignes: list[str], ret: int = 100, msg: str = "Ok"
+) -> _ReponseFactice:
     corps = "".join(f"{ligne}\n" for ligne in lignes)
     return _ReponseFactice(
-        f'100 code=00a01000 msg="Ok" format="section_line"\n[{titre}]\n{corps}'
+        f'{ret} code=00a01000 msg="{msg}" format="section_line"\n[{titre}]\n{corps}',
+        ret=ret,
+        msg=msg,
     )
 
 
@@ -163,12 +178,15 @@ def test_une_reponse_brute_ne_fait_pas_planter_la_lecture() -> None:
 
 def test_le_mot_de_passe_encode_est_masque() -> None:
     """Le SDK encode `=` en `%3D` dans l'URL, et `requests` recopie cette URL dans le message
-    de son exception : chercher la seule forme littérale laissait fuir le secret."""
+    de son exception : chercher la seule forme littérale laissait fuir le secret. Le masquage
+    va jusqu'à la fin de la chaîne : ce qui suit (ici le « Caused by » ajouté par `requests`)
+    est masqué avec lui, ce qui est sans conséquence, alors que s'arrêter plus tôt est une
+    fuite."""
     url = "...&cmd=USER%20PASSWORD%20dn%3Ddupont%20password%3DSECRET-42 (Caused by ...)"
     masque = _sans_secret(url)
     assert "SECRET-42" not in masque
     assert "password%3D***" in masque
-    assert "(Caused by ...)" in masque
+    assert "(Caused by ...)" not in masque
 
 
 def test_le_mot_de_passe_en_clair_reste_masque() -> None:
@@ -177,17 +195,35 @@ def test_le_mot_de_passe_en_clair_reste_masque() -> None:
     )
 
 
+def test_le_mot_de_passe_avec_espace_est_masque_jusqu_au_bout() -> None:
+    """`USER PASSWORD` exclut l'espace de son jeu de caractères généré, mais
+    `CONFIG LDAP INITIALIZE` reçoit le mot de passe de `cn=StormshieldAdmin`, saisi par
+    l'opérateur et non contraint. S'arrêter au premier blanc (`\\S*`) ne masquait alors qu'un
+    fragment : `password=mot de passe` devenait `password=*** de passe`."""
+    assert _sans_secret(
+        "CONFIG LDAP INITIALIZE domainname=interne.local o=Org dc=dc password=mot de passe"
+    ) == "CONFIG LDAP INITIALIZE domainname=interne.local o=Org dc=dc password=***"
+    assert _sans_secret("...password%3Dmot de passe (Caused by ...)") == "...password%3D***"
+
+
 class _ClientFactice:
     """Tient la place de SSLClient. Aucun réseau : la fabrique est injectée."""
 
-    def __init__(self, panne_a_l_envoi: Exception | None = None) -> None:
+    def __init__(
+        self,
+        panne_a_l_envoi: Exception | None = None,
+        reponse: _ReponseFactice | None = None,
+    ) -> None:
         self.panne_a_l_envoi = panne_a_l_envoi
+        self.reponse = reponse
         self.deconnexions = 0
 
     def send_command(self, commande: str) -> Any:
         del commande
         if self.panne_a_l_envoi is not None:
             raise self.panne_a_l_envoi
+        if self.reponse is not None:
+            return self.reponse
         return _reponse_section_line("Result", ["name=dupont"])
 
     def disconnect(self) -> None:
@@ -262,6 +298,18 @@ def test_le_secret_ne_survit_pas_dans_la_chaine_des_causes() -> None:
     assert capture.value.__cause__ is None
     # Le type de l'origine reste lisible : couper la chaîne ne coûte pas le diagnostic.
     assert "ConnectionError" in str(capture.value)
+
+
+def test_le_boitier_refusant_une_commande_leve_erreur_commande() -> None:
+    """`Response.__bool__` du vrai SDK est vrai seulement si `100 <= ret < 200` : au-delà, le
+    boîtier a refusé la commande sans que la liaison tombe. Avec un double sans `ret`/`__bool__`
+    fidèles, `bool(reponse)` valait toujours vrai et cette branche n'était atteinte par aucun
+    test hors ligne."""
+    reponse = _reponse_section_line("Result", [], ret=200, msg="Object not found")
+    boitier = _adaptateur(_ClientFactice(reponse=reponse))
+    with pytest.raises(ErreurCommande) as capture:
+        boitier.lister_utilisateurs()
+    assert (capture.value.code, capture.value.message) == (200, "Object not found")
 
 
 def test_reconnecter_ferme_la_session_precedente() -> None:
