@@ -55,6 +55,17 @@ def test_decodage_bom_puis_utf8_puis_cp1252() -> None:
     assert decoder("é".encode("cp1252")) == "é"
 
 
+def test_le_repli_est_bien_cp1252_et_non_latin_1() -> None:
+    """Les deux jeux ne diffèrent que sur les octets 0x80 à 0x9F, et c'est exactement la
+    plage d'`€`, d'`œ` et des guillemets typographiques — ce qu'Excel français écrit.
+    Sans un octet de cette plage, `latin-1` passerait tous les tests à la place de
+    `cp1252`, et l'opérateur verrait des caractères de contrôle dans les noms."""
+    octets = "Sté des œuvres 10 € « déjà »".encode("cp1252")
+    assert b"\x80" in octets and b"\x9c" in octets
+    assert decoder(octets) == "Sté des œuvres 10 € « déjà »"
+    assert decoder(octets) != octets.decode("latin-1")
+
+
 def test_lire_ouvre_un_fichier_cp1252(tmp_path: Path) -> None:
     fichier = tmp_path / "users.csv"
     fichier.write_bytes((EN_TETE + "dupont;Dupont;Chloé;\n").encode("cp1252"))
