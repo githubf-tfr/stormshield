@@ -35,6 +35,36 @@ def test_classes_non_demandees_absentes() -> None:
         assert all(caractere in string.ascii_lowercase + string.digits for caractere in genere)
 
 
+def _classe(caractere: str) -> str:
+    if caractere in string.ascii_lowercase:
+        return "minuscule"
+    if caractere in string.ascii_uppercase:
+        return "majuscule"
+    if caractere in string.digits:
+        return "chiffre"
+    return "special"
+
+
+def _signature(genere: str) -> tuple[str, ...]:
+    """Classes des quatre premiers caractères, dans l'ordre."""
+    return tuple(_classe(caractere) for caractere in genere[:4])
+
+
+def test_le_melange_casse_l_ordre_des_classes_imposees() -> None:
+    """Le générateur pose d'abord un caractère de chaque classe demandée, dans l'ordre
+    de la politique, puis complète et mélange. Rendre la chaîne avant le mélange donnerait
+    des mots de passe dont les quatre premiers caractères sont, dans l'ordre, une
+    minuscule, une majuscule, un chiffre et un spécial : un début entièrement prévisible,
+    et autant d'entropie perdue.
+
+    Quarante tirages : sous un générateur mélangé, la probabilité qu'ils partagent tous
+    la même signature est de l'ordre de 10⁻¹⁷ — ce test n'est pas un test de hasard, il
+    constate une constante là où il ne doit pas y en avoir."""
+    signatures = {_signature(generer(TOUTES_CLASSES)) for _ in range(40)}
+    assert signatures != {("minuscule", "majuscule", "chiffre", "special")}
+    assert len(signatures) > 1
+
+
 def test_deux_appels_donnent_deux_mots_de_passe() -> None:
     assert generer(TOUTES_CLASSES) != generer(TOUTES_CLASSES)
 
