@@ -1,0 +1,58 @@
+name: exe
+
+# Le poste de développement est sous Linux et PyInstaller ne produit un binaire
+# Windows que sous Windows : ce workflow est le seul chemin de construction du
+# `.exe`. Rien ne le déclenche hors d'un tag, pour qu'un `.exe` publié corresponde
+# toujours à une version nommée.
+on:
+  push:
+    tags: ["v*"]
+
+# Publier une release écrit dans le dépôt ; aucune autre permission n'est accordée.
+permissions:
+  contents: write
+
+jobs:
+  construire:
+    runs-on: windows-latest
+    defaults:
+      run:
+        # Git Bash, fourni sur les runners Windows. Les commandes ci-dessous sont
+        # écrites en syntaxe POSIX (guillemets simples, `\` de continuation) ;
+        # PowerShell, le shell par défaut sur Windows, ne les lirait pas pareil.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Une seule version : le `.exe` embarque son interpréteur, la matrice de
+          # `qualite.yml` couvre déjà le plancher déclaré par `requires-python`.
+          python-version: "3.12"
+
+      - name: Installer le projet et ses outils
+        run: pip install -e '.[dev]'
+
+      - name: Construire l'exécutable
+        # --onefile : un seul fichier à déposer sur le poste de l'opérateur.
+        # --windowed : aucune console noire ne s'ouvre derrière la fenêtre tkinter.
+        run: >-
+          pyinstaller --onefile --windowed
+          --name injection-utilisateurs-sns
+          stormshield_utilisateurs/__main__.py
+
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # `${GITHUB_REF_NAME}` plutôt que `${{ github.ref_name }}` : un nom de tag
+        # interpolé par Actions est recollé dans le script avant son exécution, une
+        # variable d'environnement ne l'est pas.
+        #
+        # Notes en ASCII sans accent : elles traversent un shell Windows avant
+        # d'atteindre l'API, et un accent mal transcodé dans une note publique est
+        # pire que son absence.
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/injection-utilisateurs-sns.exe" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Executable non signe : au premier lancement, Windows SmartScreen affiche << Windows a protege votre ordinateur >>. Cliquer sur << Informations complementaires >> puis << Executer quand meme >>. Cet avertissement est attendu."
