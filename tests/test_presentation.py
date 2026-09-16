@@ -44,6 +44,7 @@ from stormshield_utilisateurs.modele import (
 from stormshield_utilisateurs.presentation import (
     AnnuaireCree,
     AnnuaireManquant,
+    BoiteParLot,
     ComptesEnregistrables,
     Connexion,
     IncidentInterface,
@@ -302,6 +303,35 @@ def test_le_resume_de_l_incident_dit_que_lancer_reste_grise() -> None:
     même boîtier, et son démarrage viderait la liste des mots de passe du premier."""
     resume = resume_de_l_incident(IncidentInterface(ValueError("bing")))
     assert "Lancer" in resume
+
+
+def test_le_resume_de_l_incident_dit_ou_iront_les_anomalies_suivantes() -> None:
+    """Une seule boîte par lot : l'opérateur doit savoir que le reste est au journal."""
+    assert "journal" in resume_de_l_incident(IncidentInterface(ValueError("bing"))).split(
+        "suivantes"
+    )[-1]
+
+
+def test_la_premiere_anomalie_du_lot_ouvre_une_boite() -> None:
+    boite = BoiteParLot()
+    assert boite.doit_ouvrir() is True
+
+
+def test_les_anomalies_suivantes_du_lot_ne_vont_qu_au_journal() -> None:
+    """Une boîte modale Tk fait tourner une boucle imbriquée : une panne d'affichage
+    persistante en ouvrirait une par message, des centaines sur un lot de deux cents
+    comptes, empilées les unes dans les autres."""
+    boite = BoiteParLot()
+    boite.doit_ouvrir()
+    assert [boite.doit_ouvrir() for _ in range(200)] == [False] * 200
+
+
+def test_un_nouveau_lot_rouvre_le_droit_a_une_boite() -> None:
+    """Le silence ne vaut que pour le lot qui a déjà parlé."""
+    boite = BoiteParLot()
+    boite.doit_ouvrir()
+    boite.reinitialiser()
+    assert boite.doit_ouvrir() is True
 
 
 def test_un_message_inconnu_de_la_fenetre_laisse_une_trace() -> None:

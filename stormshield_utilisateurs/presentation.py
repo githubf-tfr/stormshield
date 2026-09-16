@@ -175,13 +175,38 @@ def lignes_de_l_incident(incident: IncidentInterface) -> list[str]:
     return lignes
 
 
+class BoiteParLot:
+    """Autorise une seule boîte de dialogue d'anomalie par lot.
+
+    Une boîte modale Tk fait tourner une boucle d'événements imbriquée : ouverte depuis
+    l'intérieur d'un tour de pompe, elle laisse ce tour se rappeler lui-même. Une panne
+    d'affichage persistante ouvrirait alors une boîte par message — des centaines sur un
+    lot de deux cents comptes, empilées et imbriquées, jusqu'à ce que l'opérateur ne
+    puisse plus rien atteindre. La première anomalie du lot se dit donc à l'écran, les
+    suivantes n'existent que dans le journal de la fenêtre.
+    """
+
+    def __init__(self) -> None:
+        self._deja_ouverte = False
+
+    def doit_ouvrir(self) -> bool:
+        """Vrai une seule fois par lot. Consomme le droit d'ouvrir."""
+        deja, self._deja_ouverte = self._deja_ouverte, True
+        return not deja
+
+    def reinitialiser(self) -> None:
+        """Au démarrage d'un lot : le silence ne vaut que pour le lot qui a déjà parlé."""
+        self._deja_ouverte = False
+
+
 def resume_de_l_incident(incident: IncidentInterface) -> str:
     """Une phrase pour la boîte de dialogue ; le détail reste dans le journal."""
     return (
         f"{type(incident.erreur).__name__} : {incident.erreur}\n\n"
         "L'affichage a peut-être manqué des étapes ; la trace complète est dans le "
         "journal de la fenêtre. Le travail déjà lancé sur le firewall, lui, se poursuit : "
-        "le bouton « Lancer » reste donc grisé jusqu'au bilan de ce lot."
+        "le bouton « Lancer » reste donc grisé jusqu'au bilan de ce lot.\n\n"
+        "Les anomalies suivantes de ce lot n'iront plus qu'au journal de la fenêtre."
     )
 
 

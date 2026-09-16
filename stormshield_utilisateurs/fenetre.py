@@ -14,9 +14,11 @@ Quatre règles tiennent ce fichier :
   arguments : un test de structure le vérifie sur ce source ;
 - aucun aiguillage sur une chaîne. `_appliquer` filtre sur le type du message, et les
   exceptions du métier ont été traduites en types par `message_de_fil` ;
-- rien ne disparaît en silence. Ce que la pompe ou Tk attrape part au journal et dans
-  une boîte de dialogue : il n'y a ni fichier de journal, ni `stderr` dans un
-  exécutable fenêtré ;
+- rien ne disparaît en silence. Ce que la pompe ou Tk attrape part au journal, et une
+  fois par lot dans une boîte de dialogue : il n'y a ni fichier de journal, ni `stderr`
+  dans un exécutable fenêtré. Aucune de ces boîtes ne s'ouvre depuis l'intérieur d'un
+  tour de pompe — une modale Tk fait tourner une boucle imbriquée, qui rappellerait ce
+  tour dans lui-même ;
 - rien ne détruit un secret sans que l'opérateur l'ait dit. Les mots de passe générés
   n'existent que dans ce processus : un nouveau lot comme une fermeture de fenêtre
   demandent confirmation tant qu'ils n'ont pas été écrits.
@@ -53,6 +55,7 @@ from stormshield_utilisateurs.presentation import (
     POLITIQUE_INITIALE,
     AnnuaireCree,
     AnnuaireManquant,
+    BoiteParLot,
     ComptesEnregistrables,
     Connexion,
     IncidentInterface,
@@ -127,6 +130,8 @@ class Fenetre:
         self.politique: PolitiqueMotDePasse | None = None
         self.plancher: PlancherPolitique | None = None
         self.enregistrables = ComptesEnregistrables()
+        # Une boîte d'anomalie par lot ; les suivantes ne vont qu'au journal.
+        self.boite_incident = BoiteParLot()
         self._construire_widgets()
 
     # --- construction ----------------------------------------------------
@@ -370,6 +375,9 @@ class Fenetre:
         # le bouton ne doit pas rester actif sur un contenu qui vient d'être vidé.
         self.enregistrables.reinitialiser()
         self.bouton_enregistrer.configure(state=tk.DISABLED)
+        # Le lot qui commence a droit à sa boîte : le silence ne valait que pour le
+        # précédent.
+        self.boite_incident.reinitialiser()
         # Variable locale : rien de `self` ne doit voyager jusqu'au fil.
         file: queue.Queue[MessageFil] = queue.Queue()
         fil = threading.Thread(
@@ -406,11 +414,20 @@ class Fenetre:
         déverse encore les siens. Seul le message terminal du lot réactive le bouton ;
         s'il n'arrive jamais, la fenêtre reste bloquée sur ce lot-là, et c'est la
         conduite voulue.
+
+        Une seule boîte par lot, et jamais depuis l'intérieur du tour de pompe : elle
+        est planifiée pour le tour de boucle suivant. Une boîte modale fait tourner une
+        boucle d'événements imbriquée — ouverte ici, elle laisserait la pompe se
+        rappeler elle-même, et une panne d'affichage persistante empilerait une boîte
+        par message. Le journal, lui, reçoit tout.
         """
         self._ecrire_lignes(lignes_de_l_incident(incident))
-        messagebox.showerror(
-            "Anomalie interne", resume_de_l_incident(incident), parent=self.racine
-        )
+        if self.boite_incident.doit_ouvrir():
+            resume = resume_de_l_incident(incident)
+            self._planifier(0, lambda: self._boite_d_anomalie(resume))
+
+    def _boite_d_anomalie(self, resume: str) -> None:
+        messagebox.showerror("Anomalie interne", resume, parent=self.racine)
 
     def _signaler_exception_tk(self, erreur: BaseException) -> None:
         """Ce que Tk attrape hors de la pompe. Dernier recours : `stderr` s'il en reste."""
