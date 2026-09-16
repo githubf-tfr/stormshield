@@ -43,6 +43,7 @@ from stormshield_utilisateurs.presentation import (
     AnnuaireCree,
     AnnuaireManquant,
     ComptesEnregistrables,
+    Connexion,
     MessageFil,
     Parametres,
     ParametresAnnuaire,
@@ -66,23 +67,33 @@ DURCIE = PolitiqueMotDePasse(
 )
 
 
+def connexion(
+    hote: str = "firewall.local",
+    compte: str = "admin",
+    mot_de_passe: str = "secret",
+    verifier_certificat: bool = True,
+) -> Connexion:
+    return Connexion(
+        hote=hote,
+        compte=compte,
+        mot_de_passe=mot_de_passe,
+        verifier_certificat=verifier_certificat,
+    )
+
+
 def parametres(
     hote: str = "firewall.local",
     compte: str = "admin",
     mot_de_passe: str = "secret",
     fichier: Path = Path("entree.csv"),
     simulation: bool = True,
-    verifier_certificat: bool = True,
     politique: PolitiqueMotDePasse = DURCIE,
 ) -> Parametres:
     """Paramètres complets et valides ; chaque test n'altère que ce qui l'intéresse."""
     return Parametres(
-        hote=hote,
-        compte=compte,
-        mot_de_passe=mot_de_passe,
+        connexion=connexion(hote=hote, compte=compte, mot_de_passe=mot_de_passe),
         fichier=fichier,
         simulation=simulation,
-        verifier_certificat=verifier_certificat,
         politique=politique,
     )
 
@@ -494,7 +505,7 @@ def test_la_creation_d_annuaire_ouvre_sa_propre_connexion() -> None:
     boitier = BoitierMemoire(annuaires=())
     messages, publier = collecter()
     travailler_annuaire(
-        parametres(),
+        connexion(),
         ParametresAnnuaire("interne.local", "Societe", "dc=interne,dc=local", "secret"),
         publier,
         fabriquer_boitier=lambda _: boitier,
@@ -509,7 +520,7 @@ def test_un_annuaire_apparu_entre_temps_annule_la_creation() -> None:
     boitier = BoitierMemoire(annuaires=("interne.local",))
     messages, publier = collecter()
     travailler_annuaire(
-        parametres(),
+        connexion(),
         ParametresAnnuaire("autre.local", "Societe", "dc=autre,dc=local", "secret"),
         publier,
         fabriquer_boitier=lambda _: boitier,
@@ -530,7 +541,7 @@ def test_une_creation_d_annuaire_refusee_remonte_le_refus() -> None:
     boitier.declencheur = refuser
     messages, publier = collecter()
     travailler_annuaire(
-        parametres(),
+        connexion(),
         ParametresAnnuaire("interne.local", "Societe", "dc=interne,dc=local", "secret"),
         publier,
         fabriquer_boitier=lambda _: boitier,

@@ -73,18 +73,32 @@ _TERMINAUX: tuple[type, ...] = (Termine, Echoue, AnnuaireManquant, AnnuaireCree)
 
 
 @dataclass(frozen=True)
+class Connexion:
+    """De quoi ouvrir une session sur le boîtier, et rien de plus.
+
+    Séparé des paramètres du lot parce que la création d'un annuaire ouvre sa propre
+    session sans rien avoir à savoir d'un CSV ni d'une politique de mot de passe.
+
+    Aucun identifiant n'est mémorisé d'un lancement à l'autre : cet objet naît au clic
+    sur *Lancer* et disparaît avec le fil qui l'a reçu.
+    """
+
+    hote: str
+    compte: str
+    mot_de_passe: str
+    verifier_certificat: bool
+
+
+@dataclass(frozen=True)
 class Parametres:
     """Tout ce dont le fil d'exécution a besoin, lu dans le fil de l'interface.
 
     Le fil ne touche aucun widget : il ne lit que cet objet, figé avant son démarrage.
     """
 
-    hote: str
-    compte: str
-    mot_de_passe: str
+    connexion: Connexion
     fichier: Path
     simulation: bool
-    verifier_certificat: bool
     politique: PolitiqueMotDePasse
 
 
@@ -202,11 +216,11 @@ def obstacles_au_lancement(
     connexion, et la politique avant le moindre envoi.
     """
     obstacles: list[str] = []
-    if not parametres.hote.strip():
+    if not parametres.connexion.hote.strip():
         obstacles.append("l'hôte du firewall n'est pas renseigné")
-    if not parametres.compte.strip():
+    if not parametres.connexion.compte.strip():
         obstacles.append("le compte d'administration n'est pas renseigné")
-    if not parametres.mot_de_passe:
+    if not parametres.connexion.mot_de_passe:
         obstacles.append("le mot de passe du compte d'administration n'est pas renseigné")
     if not str(parametres.fichier).strip() or parametres.fichier == Path():
         obstacles.append("aucun fichier CSV n'est désigné")
@@ -306,15 +320,15 @@ def lignes_du_rapport(rapport: Rapport) -> list[str]:
     return lignes
 
 
-def boitier_du_parametrage(parametres: Parametres) -> Boitier:
+def boitier_de_la_connexion(connexion: Connexion) -> Boitier:
     """Fabrique de production. Injectée dans les tests pour rester hors réseau."""
     return BoitierSDK(
-        hote=parametres.hote,
-        utilisateur=parametres.compte,
-        mot_de_passe=parametres.mot_de_passe,
+        hote=connexion.hote,
+        utilisateur=connexion.compte,
+        mot_de_passe=connexion.mot_de_passe,
         # Jamais câblé en dur : la valeur vient d'une case que l'opérateur décoche,
         # cochée à chaque ouverture de la fenêtre.
-        verifier_certificat=parametres.verifier_certificat,
+        verifier_certificat=connexion.verifier_certificat,
     )
 
 
@@ -322,14 +336,14 @@ def travailler(
     parametres: Parametres,
     utilisateurs: Sequence[Utilisateur],
     publier: Publieur,
-    fabriquer_boitier: Callable[[Parametres], Boitier] = boitier_du_parametrage,
+    fabriquer_boitier: Callable[[Connexion], Boitier] = boitier_de_la_connexion,
 ) -> None:
     """Corps du fil d'exécution : ne touche aucun widget, ne fait que publier.
 
     Toute exception est convertie en message : le fil n'a pas d'appelant, ce qu'il
     laisserait passer ne s'afficherait nulle part.
     """
-    boitier = fabriquer_boitier(parametres)
+    boitier = fabriquer_boitier(parametres.connexion)
     try:
         executer(
             boitier,
@@ -343,17 +357,17 @@ def travailler(
 
 
 def travailler_annuaire(
-    parametres: Parametres,
+    connexion: Connexion,
     annuaire: ParametresAnnuaire,
     publier: Publieur,
-    fabriquer_boitier: Callable[[Parametres], Boitier] = boitier_du_parametrage,
+    fabriquer_boitier: Callable[[Connexion], Boitier] = boitier_de_la_connexion,
 ) -> None:
     """Création de l'annuaire, dans son propre fil et sa propre connexion.
 
     `executer` a déjà déconnecté le boîtier dans son `finally` : il n'y a plus de
     session à reprendre au moment où l'opérateur valide cette fenêtre.
     """
-    boitier = fabriquer_boitier(parametres)
+    boitier = fabriquer_boitier(connexion)
     try:
         boitier.connecter()
         publier(Journal(f"création de l'annuaire {annuaire.domainname} en cours"))
