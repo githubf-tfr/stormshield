@@ -23,7 +23,6 @@ from stormshield_utilisateurs.boitier_sdk import BoitierSDK
 from stormshield_utilisateurs.execution import (
     AnnuaireAbsent,
     AnnuaireDejaPresent,
-    Echoue,
     Evenement,
     Journal,
     PolitiqueRefusee,
@@ -49,6 +48,18 @@ PERIODE_POMPE_MS = 100
 # boîtier. Elle peut partir en lot réel : le métier la confronte au plancher qu'il vient
 # de lire et émet `PolitiqueRefusee` avant le moindre envoi si elle ne le tient pas.
 POLITIQUE_INITIALE = motdepasse.proposer(PlancherPolitique(0, 0, 0))
+
+
+@dataclass(frozen=True)
+class Echoue:
+    """Arrêt avant toute écriture : annuaire absent ou multiple, connexion refusée.
+
+    Déclaré ici et non dans `execution` : le métier ne l'émet jamais. C'est cette
+    couche-ci qui le construit, à partir d'une exception qui a traversé le fil, et la
+    fenêtre qui l'affiche.
+    """
+
+    message: str
 
 
 @dataclass(frozen=True)
@@ -105,7 +116,7 @@ class DemandeConfirmation:
 # Ce qui circule du fil d'exécution vers la fenêtre : les événements du métier, plus
 # les deux verdicts que seule la fenêtre sait traiter, et la demande d'autorisation
 # d'écrire — la seule à attendre une réponse.
-MessageFil = Evenement | AnnuaireManquant | AnnuaireCree | DemandeConfirmation
+MessageFil = Evenement | Echoue | AnnuaireManquant | AnnuaireCree | DemandeConfirmation
 Publieur = Callable[[MessageFil], None]
 
 # Rien ne suit un message terminal : la pompe s'arrête, le bouton Lancer se réactive.

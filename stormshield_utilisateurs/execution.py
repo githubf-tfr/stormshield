@@ -193,13 +193,6 @@ class Termine:
     rapport: Rapport
 
 
-@dataclass(frozen=True)
-class Echoue:
-    """Arrêt avant toute écriture : annuaire absent ou multiple, connexion refusée."""
-
-    message: str
-
-
 Evenement = (
     Journal
     | PolitiqueLue
@@ -208,7 +201,6 @@ Evenement = (
     | Progression
     | CreationReussie
     | Termine
-    | Echoue
 )
 Emetteur = Callable[[Evenement], None]
 

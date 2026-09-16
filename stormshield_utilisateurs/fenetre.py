@@ -39,7 +39,6 @@ from types import TracebackType
 from stormshield_utilisateurs import lecture, sortie
 from stormshield_utilisateurs.execution import (
     CreationReussie,
-    Echoue,
     Journal,
     PlanPret,
     PolitiqueLue,
@@ -62,6 +61,7 @@ from stormshield_utilisateurs.presentation import (
     ComptesEnregistrables,
     Connexion,
     DemandeConfirmation,
+    Echoue,
     IncidentInterface,
     MessageFil,
     Parametres,
