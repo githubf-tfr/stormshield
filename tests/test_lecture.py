@@ -18,6 +18,15 @@ def test_colonne_manquante_fait_echouer_le_fichier_entier() -> None:
     assert "prenom" in str(erreur.value)
 
 
+def test_espaces_parasites_autour_des_noms_de_colonnes_n_empechent_pas_la_lecture() -> None:
+    """La vérification de structure strippe l'en-tête : l'extraction des champs doit
+    voir les mêmes clés, sous peine de rejets silencieux pour "identifiant vide"."""
+    contenu = " identifiant ; nom ;prenom; groupes \ndupont;Dupont;Marie;\n"
+    utilisateurs, rejets = lire_texte(contenu)
+    assert rejets == []
+    assert utilisateurs[0].identifiant == "dupont"
+
+
 def test_colonnes_dans_n_importe_quel_ordre_et_colonnes_en_trop_ignorees() -> None:
     contenu = "mail;groupes;prenom;nom;identifiant\nx@y.z;compta;Marie;Dupont;dupont\n"
     utilisateurs, rejets = lire_texte(contenu)

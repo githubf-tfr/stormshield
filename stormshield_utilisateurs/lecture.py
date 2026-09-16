@@ -63,7 +63,12 @@ def _motifs(identifiant: str, nom: str, prenom: str) -> list[str]:
 
 def lire_texte(contenu: str) -> tuple[list[Utilisateur], list[Rejet]]:
     lecteur = csv.DictReader(io.StringIO(contenu, newline=""), delimiter=SEPARATEUR)
-    presentes = {(colonne or "").strip() for colonne in (lecteur.fieldnames or [])}
+    # Les noms de colonnes sont strippés une fois ici : la vérification de structure
+    # et l'extraction des champs doivent voir les mêmes clés, sous peine de rejets
+    # silencieux si l'en-tête porte un espace parasite.
+    if lecteur.fieldnames is not None:
+        lecteur.fieldnames = [(colonne or "").strip() for colonne in lecteur.fieldnames]
+    presentes = set(lecteur.fieldnames or ())
     manquantes = tuple(colonne for colonne in COLONNES_ATTENDUES if colonne not in presentes)
     if manquantes:
         raise ColonnesManquantes(manquantes)
