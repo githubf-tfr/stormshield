@@ -183,6 +183,19 @@ def resume_de_l_incident(incident: IncidentInterface) -> str:
     )
 
 
+def texte_de_demarrage_impossible(erreur: BaseException) -> str:
+    """Ce qui s'affiche quand la fenêtre n'a même pas pu naître.
+
+    `tkinter` absent ou aucun affichage utilisable : l'exception partirait sur `stderr`,
+    et un exécutable construit en mode fenêtré n'en a pas — il ne ferait rien du tout.
+    """
+    return (
+        f"L'interface n'a pas pu démarrer.\n\n{type(erreur).__name__} : {erreur}\n\n"
+        "Causes les plus fréquentes : le paquet tkinter n'est pas installé avec ce "
+        "Python, ou aucun affichage n'est utilisable depuis cette session."
+    )
+
+
 def ligne_de_message_inconnu(message: MessageFil) -> str:
     """Un message qu'aucune branche ne reconnaît ne doit pas disparaître en silence."""
     return (

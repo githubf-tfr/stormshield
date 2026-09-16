@@ -67,6 +67,7 @@ from stormshield_utilisateurs.presentation import (
     politique_a_afficher,
     reglage_barre,
     resume_de_l_incident,
+    texte_de_demarrage_impossible,
     travailler,
     travailler_annuaire,
 )
@@ -914,6 +915,27 @@ class Fenetre:
             target=travailler, args=(parametres, utilisateurs, file.put), daemon=True
         ).start()
 """
+
+
+def test_le_point_d_entree_n_importe_pas_la_fenetre_au_niveau_module() -> None:
+    """Sans quoi il n'y aurait aucun filet : l'import de `tkinter` lèverait avant que
+    quoi que ce soit ne puisse l'afficher, et un .exe fenêtré ne ferait rien du tout."""
+    point_d_entree = Path(presentation.__file__).with_name("__main__.py")
+    arbre = ast.parse(point_d_entree.read_text(encoding="utf-8"))
+    importes_au_niveau_module = [
+        noeud.module
+        for noeud in arbre.body
+        if isinstance(noeud, ast.ImportFrom) and noeud.module is not None
+    ]
+    assert "stormshield_utilisateurs.fenetre" not in importes_au_niveau_module
+
+
+def test_le_texte_de_demarrage_impossible_nomme_les_deux_causes() -> None:
+    """Seul message que verra l'opérateur d'un exécutable sans console."""
+    texte = texte_de_demarrage_impossible(ImportError("No module named 'tkinter'"))
+    assert "tkinter" in texte
+    assert "affichage" in texte
+    assert "ImportError" in texte
 
 
 def test_le_garde_fou_laisse_passer_un_fil_sain() -> None:
