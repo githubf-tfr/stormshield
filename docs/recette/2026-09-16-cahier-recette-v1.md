@@ -23,8 +23,8 @@ ci-dessous est formulé pour se trancher sans interprétation.
 ## Comment s'en servir
 
 - **Boîtier : non** — se joue sur un poste Windows seul. 21 cas.
-- **Boîtier : oui** — exige un SNS de maquette joignable. 81 cas.
-- **102 cas au total.**
+- **Boîtier : oui** — exige un SNS de maquette joignable. 88 cas.
+- **109 cas au total.**
 
 Jouer d'abord les cas sans boîtier (sections B à D), puis les sections E et suivantes.
 Consigner le verdict de chaque cas : **OK**, **KO** ou **NJ** (non joué, avec le motif).
@@ -468,7 +468,7 @@ Le KO est une troisième issue : l'outil poursuit **en visant le domaine externe
 **40 — Aucun mot de passe ne fuit dans un message d'erreur** · boîtier : oui
 *Objectif* : le masquage `password=***` tient sur un vrai échec, URL encodée comprise.
 *Départ* : lot réel en cours de création de comptes.
-*Actions* : provoquer une coupure de liaison **pendant** la phase d'écriture (cas 79), puis
+*Actions* : provoquer une coupure de liaison **pendant** la phase d'écriture (cas 80), puis
 relire l'intégralité du journal, y compris les lignes de trace.
 *Attendu* : le journal ne contient **aucun** mot de passe en clair. Toute occurrence de
 `password` y apparaît sous la forme `password=***` ou `password%3D***`. Vérifier également
@@ -478,7 +478,7 @@ que le CSV des mots de passe est le **seul** endroit où un secret apparaît.
 **41 — Une seule session à la fois** · boîtier : oui
 *Objectif* : les reconnexions ne saturent pas la limite d'authentification du boîtier.
 *Départ* : boîtier dont on sait consulter les sessions actives de l'API.
-*Actions* : jouer le cas 79 (coupure et reconnexion) deux fois de suite, puis consulter les
+*Actions* : jouer le cas 80 (coupure et reconnexion) deux fois de suite, puis consulter les
 sessions actives du boîtier.
 *Attendu* : à la fin du lot, **aucune** session de l'outil ne reste ouverte. Pendant le lot,
 jamais plus d'une. Aucun message de limite d'authentification atteinte.
@@ -800,16 +800,33 @@ finalement écrit ne contient que les comptes du **nouveau** lot — aucun du pr
 *Attendu* : **aucune boîte** d'avertissement ; le lot démarre directement.
 *Verdict* : OK / KO —
 
-**74 — Enregistrer en cours de lot, puis relancer** · boîtier : oui
-*Objectif* : le rang d'eau sépare correctement ce qui est écrit de ce qui a suivi.
+**74 — Enregistrer en cours de lot, puis relancer : le recompte est total** · boîtier : oui
+*Objectif* : le bilan d'un lot remet à zéro ce qui est réputé déjà enregistré ; l'avertissement
+qui suit recompte tout, par choix délibéré et conservateur.
 *Départ* : `lot-200.csv`, lot réel en cours.
 *Actions* : vers le milieu du lot, cliquer *Enregistrer* et écrire le fichier ; laisser le
 lot aller à son terme ; cliquer *Lancer*.
-*Attendu* : l'avertissement revient, et le nombre qu'il annonce ne compte **que** les comptes
-créés **après** l'enregistrement — pas le lot entier.
+*Attendu* : l'avertissement revient, et le nombre qu'il annonce compte **tous** les comptes à
+mot de passe du rapport final — y compris ceux déjà écrits pendant le lot, et pas seulement
+ceux créés après l'enregistrement. Comportement voulu : avertir deux fois coûte un clic, ne
+pas avertir coûte des mots de passe qu'aucun relancement ne recrée.
 *Verdict* : OK / KO —
 
-**75 — Aucun secret à perdre : aucun avertissement** · boîtier : oui
+**75 — Enregistrer pendant que le sélecteur reste ouvert : les comptes créés entre-temps ne sont pas soldés** · boîtier : oui
+*Objectif* : le sélecteur de fichiers fait tourner la boucle d'événements de Tk ; ce qui est
+créé pendant qu'il est ouvert ne doit jamais être compté comme enregistré.
+*Départ* : `lot-200.csv`, lot réel en cours, au moins deux comptes déjà créés.
+*Actions* : cliquer *Enregistrer les mots de passe…* ; **laisser le sélecteur ouvert** le
+temps qu'au moins un compte de plus soit créé (l'observer apparaître au journal, derrière la
+boîte) ; valider le sélecteur sur un chemin d'écriture ; laisser le lot aller à son terme ;
+cliquer *Lancer*.
+*Attendu* : le CSV écrit ne porte que les comptes créés **avant** l'ouverture du sélecteur.
+Une fois le lot terminé, cliquer *Lancer* fait réapparaître l'avertissement de perte, et le
+nombre qu'il annonce **inclut** les comptes créés pendant que le sélecteur était ouvert : ils
+n'ont jamais été soldés.
+*Verdict* : OK / KO —
+
+**76 — Aucun secret à perdre : aucun avertissement** · boîtier : oui
 *Objectif* : l'avertissement ne se déclenche pas sur des comptes déjà à reprendre à la main.
 *Départ* : un lot dont **tous** les comptes ont été créés sans mot de passe (cas 62 forcé sur
 tout le lot). **Noter NJ si impossible à provoquer.**
@@ -821,7 +838,7 @@ tout le lot). **Noter NJ si impossible à provoquer.**
 
 # K. Fermeture de la fenêtre
 
-**76 — Fermer en plein lot** · boîtier : oui
+**77 — Fermer en plein lot** · boîtier : oui
 *Objectif* : le fil est un démon ; le fermer peut laisser un compte créé sans mot de passe.
 *Départ* : `lot-200.csv`, lot réel en cours.
 *Actions* : cliquer la croix de la fenêtre ; répondre **Non** ; recliquer la croix ; répondre
@@ -832,7 +849,7 @@ fermeture et le lot poursuit visiblement (la barre continue d'avancer). **Oui** 
 l'outil.
 *Verdict* : OK / KO —
 
-**77 — Fermer avec des secrets non enregistrés** · boîtier : oui
+**78 — Fermer avec des secrets non enregistrés** · boîtier : oui
 *Objectif* : la fermeture est la seconde porte par laquelle les secrets disparaissent.
 *Départ* : lot **terminé** ayant créé 3 comptes, non enregistrés.
 *Actions* : cliquer la croix.
@@ -841,7 +858,7 @@ avec la fenêtre », précise que les comptes resteront créés, et propose « F
 même ? » avec **Non** par défaut.
 *Verdict* : OK / KO —
 
-**78 — Fermer quand il n'y a rien à perdre** · boîtier : non
+**79 — Fermer quand il n'y a rien à perdre** · boîtier : non
 *Objectif* : l'outil ne pose pas de question inutile.
 *Départ* : outil ouvert, aucun lot lancé (ou lot terminé et secrets enregistrés).
 *Actions* : cliquer la croix.
@@ -852,7 +869,7 @@ même ? » avec **Non** par défaut.
 
 # L. Coupures, arrêts et reprise
 
-**79 — Coupure brève : reconnexion et replanification** · boîtier : oui
+**80 — Coupure brève : reconnexion et replanification** · boîtier : oui
 *Objectif* : une liaison qui retombe ne fait ni perdre le lot, ni rejouer une écriture.
 *Départ* : `lot-200.csv`, lot réel en cours de création de comptes.
 *Actions* : débrancher le câble réseau du poste (ou couper le Wi-Fi) pendant 5 secondes, puis
@@ -864,9 +881,9 @@ déjà créés en sortent) et la barre suit cette baisse sans anomalie visuelle 
 valeur affichée. Le lot reprend et va à son terme.
 *Verdict* : OK / KO —
 
-**80 — Aucun doublon après reconnexion** · boîtier : oui
+**81 — Aucun doublon après reconnexion** · boîtier : oui
 *Objectif* : la commande interrompue n'est jamais rejouée ; l'outil relit et replanifie.
-*Départ* : cas 79 joué.
+*Départ* : cas 80 joué.
 *Actions* : relire `USER LIST` et `USER GROUP LIST` sur le boîtier, ainsi que le rapport
 final.
 *Attendu* : chaque compte et chaque groupe existe **une seule fois**. Aucun échec du type
@@ -874,7 +891,7 @@ final.
 nombre réellement apparu sur le boîtier.
 *Verdict* : OK / KO —
 
-**81 — Coupure prolongée : trois tentatives puis arrêt** · boîtier : oui
+**82 — Coupure prolongée : trois tentatives puis arrêt** · boîtier : oui
 *Objectif* : l'outil ne tourne pas indéfiniment sur une liaison morte.
 *Départ* : `lot-200.csv`, lot réel en cours.
 *Actions* : débrancher le réseau et **ne pas** rebrancher ; observer le journal.
@@ -884,16 +901,16 @@ d'environ deux secondes, puis « arrêt : liaison irrécupérable. Ce qui est cr
 et porte « La liaison est tombée : **relancer le lot suffit, rien à corriger.** ».
 *Verdict* : OK / KO —
 
-**82 — Reprise après l'arrêt** · boîtier : oui
+**83 — Reprise après l'arrêt** · boîtier : oui
 *Objectif* : le lot reprend là où il en est, sans rien créer deux fois.
-*Départ* : cas 81 joué, réseau rebranché ; relever ce que le boîtier porte réellement.
+*Départ* : cas 82 joué, réseau rebranché ; relever ce que le boîtier porte réellement.
 *Actions* : relancer le **même** CSV en lot réel ; comparer au relevé.
 *Attendu* : les comptes déjà créés tombent en « déjà présent, ignoré », les autres sont
 créés, et le boîtier finit avec **exactement** les 200 comptes, chacun une fois. Aucun échec
 « existe déjà ».
 *Verdict* : OK / KO —
 
-**83 — Coupure entre la création et le mot de passe** · boîtier : oui
+**84 — Coupure entre la création et le mot de passe** · boîtier : oui
 *Objectif* : un compte créé mais laissé sans mot de passe ne doit jamais sortir du lot sans
 trace.
 *Départ* : `lot-200.csv`, lot réel en cours. **Noter NJ si le moment ne peut pas être visé.**
@@ -904,7 +921,7 @@ sans mot de passe utilisable, à reprendre à la main ». Ce compte figure au ra
 Il existe bien sur le boîtier.
 *Verdict* : OK / KO / NJ —
 
-**84 — Arrêt définitif sur mot de passe d'administration erroné** · boîtier : oui
+**85 — Arrêt définitif sur mot de passe d'administration erroné** · boîtier : oui
 *Objectif* : ce qu'aucune reconnexion ne résout ne doit pas être retenté — le boîtier
 verrouillerait le compte.
 *Départ* : outil ouvert, mot de passe d'administration **volontairement faux**.
@@ -917,18 +934,18 @@ configuration avant de relancer le lot. ». Le rapport final commence par « Lot
 et dit de **corriger avant de relancer**.
 *Verdict* : OK / KO —
 
-**85 — Les deux arrêts se distinguent dans le rapport** · boîtier : oui
+**86 — Les deux arrêts se distinguent dans le rapport** · boîtier : oui
 *Objectif* : la conduite à tenir est lisible sans fouiller des centaines de lignes de
 journal.
-*Départ* : cas 81 (réseau) et cas 84 (fatal) joués.
+*Départ* : cas 82 (réseau) et cas 85 (fatal) joués.
 *Actions* : comparer la **première ligne** des deux rapports finaux.
-*Attendu* : le rapport du cas 81 porte « La liaison est tombée : relancer le lot suffit, rien
-à corriger. » ; celui du cas 84 porte « Une reconnexion n'y changerait rien : corrigez … avant
+*Attendu* : le rapport du cas 82 porte « La liaison est tombée : relancer le lot suffit, rien
+à corriger. » ; celui du cas 85 porte « Une reconnexion n'y changerait rien : corrigez … avant
 de relancer. ». Les deux commencent par « Lot interrompu » et finissent par « Ce qui est créé
 reste créé. ».
 *Verdict* : OK / KO —
 
-**86 — Hôte malformé : arrêt immédiat, sans reconnexions** · boîtier : non
+**87 — Hôte malformé : arrêt immédiat, sans reconnexions** · boîtier : non
 *Objectif* : requalifier la réserve de la tâche 10 — la connexion **initiale** n'est pas
 retentée, seule une coupure en cours de lot l'est.
 *Départ* : hôte = `???`, les autres champs renseignés, CSV valide.
@@ -937,14 +954,14 @@ retentée, seule une coupure en cours de lot l'est.
 **aucune** ligne « reconnexion n/3 échouée ». Le bouton *Lancer* redevient actif.
 *Verdict* : OK / KO —
 
-**87 — Après un arrêt, *Lancer* redevient actif** · boîtier : oui
+**88 — Après un arrêt, *Lancer* redevient actif** · boîtier : oui
 *Objectif* : un arrêt ne laisse pas l'outil inutilisable.
-*Départ* : l'un quelconque des cas 81, 84, 86 joué.
+*Départ* : l'un quelconque des cas 82, 85, 87 joué.
 *Actions* : observer le bouton *Lancer* après l'arrêt, puis relancer.
 *Attendu* : le bouton est **actif** et un nouveau lot peut partir sans redémarrer l'outil.
 *Verdict* : OK / KO —
 
-**88 — Le journal n'est pas vidé entre deux lancements** · boîtier : oui
+**89 — Le journal n'est pas vidé entre deux lancements** · boîtier : oui
 *Objectif* : le journal est la **seule** trace des comptes à reprendre à la main ; l'effacer
 la perdrait.
 *Départ* : un premier lot a produit au moins une ligne d'échec.
@@ -958,7 +975,7 @@ la mention correspondant bien à l'état de la case Simulation.
 
 # M. Annuaire LDAP interne
 
-**89 — Aucun annuaire : la fenêtre de création s'ouvre** · boîtier : oui
+**90 — Aucun annuaire : la fenêtre de création s'ouvre** · boîtier : oui
 *Objectif* : le seul chemin par lequel `CONFIG LDAP INITIALIZE` est atteignable.
 *Départ* : boîtier de maquette **sans aucun** annuaire LDAP interne. (Vérifier d'abord le cas
 37 : une fenêtre qui s'ouvrirait sur un boîtier pourvu signalerait une clé de lecture fausse.)
@@ -969,17 +986,17 @@ LDAP interne. » et « **Cette opération ne se refait pas.** », avec un bouton
 l'annuaire*. L'écran principal reste **nu** : aucun plan, aucune progression.
 *Verdict* : OK / KO —
 
-**90 — Champ manquant dans la fenêtre d'annuaire** · boîtier : oui
+**91 — Champ manquant dans la fenêtre d'annuaire** · boîtier : oui
 *Objectif* : une commande qui écrase une base ne part pas sur une saisie incomplète.
-*Départ* : cas 89, fenêtre ouverte.
+*Départ* : cas 90, fenêtre ouverte.
 *Actions* : laisser `o` et le mot de passe vides, cliquer *Créer l'annuaire*.
 *Attendu* : boîte « **Champ manquant** » listant « À renseigner : o, mot de passe de
 cn=StormshieldAdmin ». **Rien n'est envoyé au boîtier**.
 *Verdict* : OK / KO —
 
-**91 — Création réussie** · boîtier : oui
+**92 — Création réussie** · boîtier : oui
 *Objectif* : la séquence `INITIALIZE` → `ACTIVATE` → relecture aboutit.
-*Départ* : cas 89, fenêtre ouverte, quatre champs renseignés.
+*Départ* : cas 90, fenêtre ouverte, quatre champs renseignés.
 *Actions* : cliquer *Créer l'annuaire* ; puis relancer le lot ; puis relire l'annuaire sur le
 boîtier.
 *Attendu* : le journal principal porte « création de l'annuaire <domaine> en cours » puis
@@ -988,19 +1005,19 @@ boîtier.
 lot relancé se déroule normalement.
 *Verdict* : OK / KO —
 
-**92 — Le mot de passe d'annuaire n'est ni généré ni conservé** · boîtier : oui
+**93 — Le mot de passe d'annuaire n'est ni généré ni conservé** · boîtier : oui
 *Objectif* : l'outil ne fabrique jamais un secret à la place de l'opérateur, et ne le garde
 pas.
-*Départ* : cas 91 joué (ou cas 94, création refusée).
+*Départ* : cas 92 joué (ou cas 97, création refusée).
 *Actions* : provoquer à nouveau l'ouverture de la fenêtre de création (sur un boîtier remis
 sans annuaire), et lire les quatre champs.
 *Attendu* : **les quatre champs sont vides**, mot de passe compris. Aucune valeur n'est
 pré-remplie, aucune proposée.
 *Verdict* : OK / KO —
 
-**93 — Fermer le dialogue pendant la création** · boîtier : oui
+**94 — Fermer le dialogue pendant la création** · boîtier : oui
 *Objectif* : `CONFIG LDAP INITIALIZE` est déjà parti ; il ne s'annule pas.
-*Départ* : cas 89, quatre champs renseignés.
+*Départ* : cas 90, quatre champs renseignés.
 *Actions* : cliquer *Créer l'annuaire*, puis **immédiatement** la croix du dialogue ; après le
 verdict, recliquer la croix.
 *Attendu* : la première fermeture est **refusée**, avec la boîte « Création en cours »
@@ -1008,18 +1025,55 @@ expliquant que la commande est déjà partie et qu'il faut attendre son verdict.
 verdict, la croix referme normalement le dialogue.
 *Verdict* : OK / KO —
 
-**94 — Création refusée par le boîtier** · boîtier : oui
+**95 — Fermer la fenêtre principale pendant `CONFIG LDAP INITIALIZE`** · boîtier : oui
+*Objectif* : la commande la plus destructrice du produit ne doit jamais se refermer sur
+elle-même sans un mot, même quand c'est la fenêtre principale que l'on ferme, pas le dialogue.
+*Départ* : cas 90 (fenêtre de création d'annuaire ouverte), quatre champs renseignés.
+*Actions* : cliquer *Créer l'annuaire* ; **immédiatement**, cliquer la croix de la **fenêtre
+principale** (et non celle du dialogue) ; répondre **Non** ; attendre le verdict de la
+création.
+*Attendu* : une boîte de confirmation apparaît, nommant explicitement `CONFIG LDAP INITIALIZE`,
+disant que la commande est déjà partie sur le boîtier, qu'elle ne s'annule pas et que son
+verdict serait perdu en fermant maintenant. **Non** est présélectionné : appuyer sur Entrée
+annule la fermeture. Après **Non**, la fenêtre principale **reste ouverte** et le dialogue de
+création poursuit normalement jusqu'à son verdict.
+*Verdict* : OK / KO —
+
+**96 — Après le verdict de création, fermer la fenêtre principale ne pose plus de question sur l'annuaire** · boîtier : oui
+*Objectif* : le drapeau qui protège la fermeture pendant `CONFIG LDAP INITIALIZE` doit
+retomber une fois le verdict connu — succès ou refus — et ne doit fausser aucune fermeture
+suivante.
+*Départ* : cas 92 (création réussie) ou cas 97 (création refusée) joué.
+*Actions* : après le verdict, cliquer la croix de la **fenêtre principale**.
+*Attendu* : **aucune question ne mentionne l'annuaire ni `CONFIG LDAP INITIALIZE`** dans la
+boîte de fermeture qui apparaîtrait le cas échéant (elle ne peut plus porter que sur un lot en
+cours ou des mots de passe non enregistrés). Si rien de tout cela n'est en cours, la fenêtre
+se ferme sans aucune question.
+*Verdict* : OK / KO —
+
+**97 — Création refusée par le boîtier** · boîtier : oui
 *Objectif* : un refus laisse l'opérateur corriger, il ne fige pas le dialogue.
-*Départ* : cas 89 ; saisir un `dc` volontairement invalide.
+*Départ* : cas 90 ; saisir un `dc` volontairement invalide.
 *Actions* : cliquer *Créer l'annuaire*.
 *Attendu* : boîte « **Création refusée** » portant le message du boîtier, le dialogue **reste
 ouvert** et le bouton *Créer l'annuaire* **redevient actif**. La ligne d'échec figure aussi
 au journal principal.
 *Verdict* : OK / KO —
 
-**95 — La fenêtre principale est inerte pendant le dialogue** · boîtier : oui
+**98 — Un refus de `CONFIG LDAP INITIALIZE` ne laisse pas voir le mot de passe** · boîtier : oui
+*Objectif* : le masquage `password=***` s'applique aussi à la commande qui porte le mot de
+passe de `cn=StormshieldAdmin`, la plus sensible du produit.
+*Départ* : cas 97 rejoué (`dc` volontairement invalide).
+*Actions* : cliquer *Créer l'annuaire* ; relire la boîte « Création refusée » **et** la ligne
+correspondante du journal principal.
+*Attendu* : **aucun mot de passe en clair** n'apparaît, ni dans la boîte, ni dans le journal.
+Si le boîtier a renvoyé la commande dans son refus, elle porte `password=***` ou
+`password%3D***`, jamais le mot de passe saisi en clair.
+*Verdict* : OK / KO —
+
+**99 — La fenêtre principale est inerte pendant le dialogue** · boîtier : oui
 *Objectif* : mesurer l'effet réel de `grab_set()` — comportement non couvert par le code.
-*Départ* : cas 89, dialogue ouvert.
+*Départ* : cas 90, dialogue ouvert.
 *Actions* : cliquer *Lancer* sur la fenêtre principale, puis sa croix, puis un champ de
 saisie.
 *Attendu* : **aucune de ces actions n'aboutit** tant que le dialogue est ouvert : pas de
@@ -1027,10 +1081,10 @@ nouveau lot, pas de fermeture, pas de saisie. Si l'une aboutit, le consigner : l
 n'est pas celle attendue.
 *Verdict* : OK / KO —
 
-**96 — Un annuaire apparu entre-temps** · boîtier : oui
+**100 — Un annuaire apparu entre-temps** · boîtier : oui
 *Objectif* : la revérification interne protège contre l'écrasement d'une base existante, même
 si l'appelant se trompe.
-*Départ* : cas 89, dialogue ouvert ; **créer un annuaire depuis l'interface web du boîtier**
+*Départ* : cas 90, dialogue ouvert ; **créer un annuaire depuis l'interface web du boîtier**
 pendant que le dialogue est ouvert.
 *Actions* : renseigner les quatre champs et cliquer *Créer l'annuaire*.
 *Attendu* : boîte « Création refusée » disant que le boîtier déclare déjà un annuaire, que
@@ -1039,7 +1093,7 @@ est apparu entre-temps : il n'y a plus rien à créer.** ». Aucune commande d'i
 n'a été exécutée : la base créée depuis l'interface web est **intacte**.
 *Verdict* : OK / KO —
 
-**97 — Plusieurs annuaires : arrêt net** · boîtier : oui
+**101 — Plusieurs annuaires : arrêt net** · boîtier : oui
 *Objectif* : l'outil s'arrête plutôt que de choisir où partiraient les groupes.
 *Départ* : maquette déclarant **deux** annuaires internes.
 *Actions* : lancer un lot.
@@ -1048,11 +1102,23 @@ n'a été exécutée : la base créée depuis l'interface web est **intacte**.
 fenêtre de création** ne s'ouvre, **aucune écriture** n'a lieu.
 *Verdict* : OK / KO —
 
+**102 — Message terminal inconnu dans le dialogue d'annuaire** · boîtier : oui
+*Objectif* : un message que le dialogue de création ne reconnaît pas ne doit jamais le
+verrouiller.
+*Départ* : aucun moyen simple de provoquer ce cas sur le binaire livré — aucun message
+terminal inconnu ne tombe aujourd'hui dans cette branche. **Noter NJ si aucune provocation
+n'est possible** (build de recette instrumenté pour émettre depuis `travailler_annuaire` un
+message que le dialogue ne reconnaît pas).
+*Actions* : provoquer l'émission d'un tel message pendant une création d'annuaire en cours.
+*Attendu* : le journal principal porte « message non affiché, type inconnu de la fenêtre :
+… » ; le dialogue **reste fermable** ensuite par sa croix, sans boîte « Création en cours ».
+*Verdict* : OK / KO / NJ —
+
 ---
 
 # N. Certificat
 
-**98 — La case pilote réellement la vérification** · boîtier : oui
+**103 — La case pilote réellement la vérification** · boîtier : oui
 *Objectif* : prouver que la case n'est pas décorative et que la valeur n'est pas câblée en
 dur.
 *Départ* : boîtier à certificat auto-signé, **sans** son autorité installée sur le poste.
@@ -1062,7 +1128,7 @@ de certificat. Décochée, la connexion **aboutit** et la simulation se déroule
 issues doivent différer : deux échecs, ou deux succès, sont un KO.
 *Verdict* : OK / KO —
 
-**99 — La case revient cochée à chaque ouverture** · boîtier : non
+**104 — La case revient cochée à chaque ouverture** · boîtier : non
 *Objectif* : un contournement ne se mémorise pas.
 *Départ* : décocher la case, lancer (peu importe l'issue), fermer l'outil.
 *Actions* : rouvrir l'outil.
@@ -1073,7 +1139,7 @@ issues doivent différer : deux échecs, ou deux succès, sont un KO.
 
 # O. Volume et robustesse de l'interface
 
-**100 — 200 comptes : la fenêtre reste utilisable** · boîtier : oui
+**105 — 200 comptes : la fenêtre reste utilisable** · boîtier : oui
 *Objectif* : le lot réaliste ne fige pas l'outil.
 *Départ* : `lot-200.csv`, boîtier vierge de ces comptes.
 *Actions* : lancer un lot réel ; pendant toute son exécution, faire défiler le journal,
@@ -1082,7 +1148,7 @@ sélectionner du texte, redimensionner la fenêtre.
 pas ». La barre progresse régulièrement jusqu'à son total. Les 200 comptes existent à la fin.
 *Verdict* : OK / KO —
 
-**101 — Le journal est sélectionnable et copiable** · boîtier : oui
+**106 — Le journal est sélectionnable et copiable** · boîtier : oui
 *Objectif* : l'opérateur doit pouvoir sortir la liste des comptes à reprendre, alors que la
 zone est en lecture seule.
 *Départ* : un lot terminé avec des échecs au journal.
@@ -1092,7 +1158,7 @@ Bloc-notes ; puis tenter de **taper** du texte dans le journal.
 séparation compris. La frappe au clavier **ne modifie pas** le journal.
 *Verdict* : OK / KO —
 
-**102 — Anomalie interne de l'interface** · boîtier : oui
+**107 — Anomalie interne de l'interface** · boîtier : oui
 *Objectif* : vérifier que la pompe d'événements survit à une exception d'affichage — sans
 quoi barre et journal gèleraient pendant que l'écriture continue sur le firewall.
 *Départ* : aucun moyen simple de provoquer l'anomalie sur le binaire livré. **Si aucune
@@ -1100,12 +1166,37 @@ provocation n'est possible, jouer la variante de contrôle ci-dessous et noter N
 principal.**
 *Actions (principal)* : provoquer une exception dans l'affichage (build de recette instrumenté).
 *Attendu (principal)* : le journal porte « anomalie interne de l'interface … » **suivi de la
-trace complète** ; une boîte « Anomalie interne » s'ouvre ; **la barre et le journal
-continuent de suivre le lot** jusqu'à son terme ; le bouton *Lancer* redevient actif.
-*Actions (variante de contrôle)* : jouer les cas 49, 79 et 100 en lisant le journal en
+trace complète** ; une boîte « Anomalie interne » s'ouvre, dont le texte dit que le bouton
+« Lancer » reste grisé jusqu'au bilan du lot ; **la barre et le journal continuent de suivre
+le lot** jusqu'à son terme ; le bouton *Lancer* **reste grisé** pendant tout ce temps et ne
+redevient actif **qu'au message de bilan final** de ce lot (« Terminé : … » ou
+« Lot interrompu … »), jamais avant.
+*Actions (variante de contrôle)* : jouer les cas 49, 80 et 105 en lisant le journal en
 entier.
 *Attendu (variante)* : **aucune** ligne « anomalie interne de l'interface » et **aucune**
 ligne « message non affiché, type inconnu de la fenêtre » n'apparaît en usage normal.
+*Verdict* : OK / KO / NJ —
+
+**108 — Une seule boîte d'anomalie par lot, les suivantes au journal seulement** · boîtier : oui
+*Objectif* : une panne d'affichage qui se répète ne doit pas empiler une boîte modale par
+message, ce qui rendrait la fenêtre inatteignable sur un lot de deux cents comptes.
+*Départ* : cas 107 rejoué avec une anomalie qui se répète sur **plusieurs** messages du même
+lot (build de recette instrumenté). **Noter NJ si l'anomalie ne peut être provoquée qu'une
+seule fois.**
+*Actions* : laisser le lot dérouler plusieurs messages provoquant chacun l'anomalie ; compter
+les boîtes « Anomalie interne » qui s'ouvrent, et les lignes correspondantes au journal.
+*Attendu* : **une seule** boîte « Anomalie interne » s'ouvre pour tout le lot. Le journal, lui,
+porte **une ligne d'anomalie par message fautif** — aucune n'est perdue. Aucune boîte ne
+s'empile ni ne se rouvre en cascade.
+*Verdict* : OK / KO / NJ —
+
+**109 — Un nouveau lot rouvre le droit à une boîte d'anomalie** · boîtier : oui
+*Objectif* : le silence imposé par le cas 108 ne vaut que pour le lot qui a déjà parlé ; il
+ne doit pas s'étendre aux lots suivants.
+*Départ* : cas 108 joué (la boîte du lot précédent a déjà été consommée).
+*Actions* : lancer un **nouveau** lot ; provoquer à nouveau l'anomalie (même build
+instrumenté).
+*Attendu* : une boîte « Anomalie interne » **s'ouvre à nouveau**, pour ce nouveau lot.
 *Verdict* : OK / KO / NJ —
 
 ---
@@ -1122,19 +1213,19 @@ ligne « message non affiché, type inconnu de la fenêtre » n'apparaît en usa
 | G — Politique de mot de passe | 42 – 48 | **oui** |
 | H — Exécution réelle et idempotence | 49 – 57 | **oui** |
 | I — Échecs isolés et noms hostiles | 58 – 62 | **oui** |
-| J — Mots de passe | 63 – 75 | **oui** |
-| K — Fermeture de la fenêtre | 76 – 77 | **oui** |
-| K — Fermeture de la fenêtre | 78 | non |
-| L — Coupures, arrêts et reprise | 79 – 85, 87, 88 | **oui** |
-| L — Coupures, arrêts et reprise | 86 | non |
-| M — Annuaire LDAP interne | 89 – 97 | **oui** |
-| N — Certificat | 98 | **oui** |
-| N — Certificat | 99 | non |
-| O — Volume et robustesse | 100 – 102 | **oui** |
+| J — Mots de passe | 63 – 76 | **oui** |
+| K — Fermeture de la fenêtre | 77 – 78 | **oui** |
+| K — Fermeture de la fenêtre | 79 | non |
+| L — Coupures, arrêts et reprise | 80 – 86, 88, 89 | **oui** |
+| L — Coupures, arrêts et reprise | 87 | non |
+| M — Annuaire LDAP interne | 90 – 102 | **oui** |
+| N — Certificat | 103 | **oui** |
+| N — Certificat | 104 | non |
+| O — Volume et robustesse | 105 – 109 | **oui** |
 
-**21 cas sans boîtier** : 1 à 18, 78, 86 et 99. Ils se jouent dès qu'un poste Windows et le
+**21 cas sans boîtier** : 1 à 18, 79, 87 et 104. Ils se jouent dès qu'un poste Windows et le
 `.exe` sont disponibles, sans attendre la maquette.
-**81 cas exigeant un boîtier** : tous les autres. **102 cas au total.**
+**88 cas exigeant un boîtier** : tous les autres. **109 cas au total.**
 
 ## Traçabilité
 
@@ -1151,23 +1242,33 @@ correspondance, et **points devenus caducs**, qui ne sont donc pas repris tels q
 | 7 – 11 (saisie et refus) | 12, 13, 16, 17 ; le point 10 devient le cas 45 |
 | 12 – 16 (simulation) | 20, 22, 31, 19, 24 |
 | 17 – 19 (durcissement, refus) | 42, 43, 46 |
-| 20 – 26 (exécution réelle) | 56, 63, 64, 100, 101, 67, 88 |
-| 27 – 32 (perte de secrets) | 70, 71, 72, 73, 74, 75 |
-| 33 – 35 (fermeture) | 76, 77, 78 |
+| 20 – 26 (exécution réelle) | 56, 63, 64, 105, 106, 67, 89 |
+| 27 – 32 (perte de secrets) | 70, 71, 72, 73, 74, 76 |
+| 33 – 35 (fermeture) | 77, 78, 79 |
 | 36 – 40 (enregistrement) | 65, 66, 67, 68, 69 |
-| 41 – 44 (coupures et arrêts) | 79, 84, 85, 87 |
-| 45 – 53 (annuaire) | 89, 90, 91, 92, 93, 95, 97, 39 |
-| 54 (anomalie interne) | 102 |
-| 55 (certificat) | 98 |
+| 41 – 44 (coupures et arrêts) | 80, 85, 86, 88 |
+| 45 – 53 (annuaire) | 90, 91, 92, 93, 94, 99, 101, 39 |
+| 54 (anomalie interne) | 107 |
+| 55 (certificat) | 103 |
 
 **Les 22 cas du plan** → cas de ce cahier : 1→19, 2→49, 3→51, 4→16, 5→53, 6→28, 7→29, 8→26,
-9→25, 10→27, 11→42, 12→43, 13→63 et 66, 14→58, 15→59, 16→79 et 81, 17→82, 18→98, 19→89 et 91,
-20→97, 21→100, 22→2 et 3.
+9→25, 10→27, 11→42, 12→43, 13→63 et 66, 14→58, 15→59, 16→80 et 82, 17→83, 18→103, 19→90 et 92,
+20→101, 21→105, 22→2 et 3.
 
 **Les hypothèses de l'adaptateur SDK** → section F : table `MinSetOfChars` → cas 31 ; clés
 `name` et `domain` → cas 35, 36, 37 ; annuaires externes non filtrés → cas 39 ; `MinLength`
 vide → cas 33 ; journalisation du SDK et fuite de secret → cas 40 ; nom de groupe avec
 guillemet, espace, saut de ligne → cas 59, 60, 61.
+
+**Les points de la vague de correctifs R1 à R6** (voir
+`.superpowers/sdd/2026-09-16-injection-utilisateurs-plan/task-11-report.md`) → cas de ce
+cahier : recompte total des secrets après le bilan d'un lot (R6) → cas **74**, réécrit ;
+enregistrement pendant qu'un sélecteur reste ouvert (R1) → cas **75** ; bouton *Lancer* resté
+grisé après une anomalie interne (R2) → cas **107**, réécrit ; une seule boîte d'anomalie par
+lot et son réarmement au lot suivant (R3) → cas **108**, **109** ; fermeture de la fenêtre
+principale pendant `CONFIG LDAP INITIALIZE` (R4) → cas **95**, **96** ; masquage du mot de
+passe dans un refus de création d'annuaire (R6) → cas **98** ; message terminal inconnu dans
+le dialogue d'annuaire → cas **102**.
 
 ### Points devenus caducs
 
@@ -1180,13 +1281,13 @@ repris** :
    part) et **46** (le boîtier refuse la politique).
 2. **« Les deux arrêts ne se distinguent que dans le journal »** (point 29 de la première
    liste). `Rapport.motif_arret` porte désormais la distinction : le rapport lui-même dit
-   quelle conduite tenir. Devenu le cas **85**.
+   quelle conduite tenir. Devenu le cas **86**.
 3. **« Un hôte vide donne trois reconnexions inutiles »** (réserve 5 de la tâche 10).
    Requalifié, pour deux raisons vérifiées sur le code : un hôte vide est refusé par
    `obstacles_au_lancement` **avant toute connexion**, et la connexion **initiale** n'est de
    toute façon jamais retentée — les trois tentatives ne concernent qu'une coupure survenant
    en cours de lot. Deux cas le mesurent au lieu d'un : **15** (hôte vide, refus immédiat) et
-   **86** (hôte malformé, arrêt immédiat sans reconnexion).
+   **87** (hôte malformé, arrêt immédiat sans reconnexion).
 
 Un quatrième point a changé de nature : **« Longueur saisie non numérique »** (point 10) ne
 peut plus être joué sans boîtier. Les champs de politique restent grisés tant qu'aucune

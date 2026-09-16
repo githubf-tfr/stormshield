@@ -87,7 +87,7 @@ Modules livrés, du plus pur au plus impur :
 | `fenetre` | Seul module à importer `tkinter`, et le seul qu'aucun test n'importe |
 | `__main__` | Point d'entrée, cible de PyInstaller, filet de démarrage |
 
-- **231 tests** passent (marqueur `firewall` exclu), `ruff` et `mypy` verts, aucun
+- **243 tests** passent (marqueur `firewall` exclu), `ruff` et `mypy` verts, aucun
   `# type: ignore`.
 - Workflows : `qualite.yml` (`ruff`, `mypy`, `pytest` en matrice 3.11 / 3.12) et `exe.yml`
   (PyInstaller `--onefile --windowed` sur `windows-latest`, release sur tag `v*`).
