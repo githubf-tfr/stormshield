@@ -180,7 +180,8 @@ def resume_de_l_incident(incident: IncidentInterface) -> str:
     return (
         f"{type(incident.erreur).__name__} : {incident.erreur}\n\n"
         "L'affichage a peut-être manqué des étapes ; la trace complète est dans le "
-        "journal de la fenêtre. Le travail déjà lancé sur le firewall, lui, se poursuit."
+        "journal de la fenêtre. Le travail déjà lancé sur le firewall, lui, se poursuit : "
+        "le bouton « Lancer » reste donc grisé jusqu'au bilan de ce lot."
     )
 
 

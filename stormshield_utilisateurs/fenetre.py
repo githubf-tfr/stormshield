@@ -399,11 +399,15 @@ class Fenetre:
 
         Tk écrit sa trace sur `stderr`, qui n'existe pas dans un exécutable construit
         en mode fenêtré, et le produit n'a par conception aucun fichier de journal.
-        Le bouton *Lancer* est rendu à l'opérateur : l'anomalie a pu emporter la
-        branche qui s'en chargeait.
+
+        Ne rend jamais le bouton *Lancer* : l'anomalie n'arrête pas le fil, qui écrit
+        toujours sur le firewall. Un second lot partirait sur le même boîtier et son
+        démarrage viderait la liste des mots de passe pendant que la pompe du premier y
+        déverse encore les siens. Seul le message terminal du lot réactive le bouton ;
+        s'il n'arrive jamais, la fenêtre reste bloquée sur ce lot-là, et c'est la
+        conduite voulue.
         """
         self._ecrire_lignes(lignes_de_l_incident(incident))
-        self._reactiver_lancement()
         messagebox.showerror(
             "Anomalie interne", resume_de_l_incident(incident), parent=self.racine
         )

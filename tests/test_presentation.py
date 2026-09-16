@@ -297,6 +297,13 @@ def test_le_resume_de_l_incident_dit_que_le_lot_continue() -> None:
     assert "journal" in resume
 
 
+def test_le_resume_de_l_incident_dit_que_lancer_reste_grise() -> None:
+    """Le fil écrit toujours : rendre le bouton laisserait partir un second lot sur le
+    même boîtier, et son démarrage viderait la liste des mots de passe du premier."""
+    resume = resume_de_l_incident(IncidentInterface(ValueError("bing")))
+    assert "Lancer" in resume
+
+
 def test_un_message_inconnu_de_la_fenetre_laisse_une_trace() -> None:
     """Un message non reconnu disparaissait sans rien dire."""
     ligne = ligne_de_message_inconnu(Progression(1, 2))
