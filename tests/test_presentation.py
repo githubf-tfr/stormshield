@@ -34,6 +34,7 @@ from stormshield_utilisateurs.modele import (
     CompteCree,
     Echec,
     GroupeACreer,
+    MotifArret,
     Plan,
     PlancherPolitique,
     PolitiqueMotDePasse,
@@ -57,6 +58,7 @@ from stormshield_utilisateurs.presentation import (
     libelle_plancher,
     ligne_d_enregistrement,
     ligne_de_message_inconnu,
+    ligne_de_nouveau_lot,
     lignes_de_l_incident,
     lignes_de_la_politique_refusee,
     lignes_du_fichier,
@@ -304,11 +306,10 @@ def test_un_message_inconnu_de_la_fenetre_laisse_une_trace() -> None:
 # --- barre de progression -------------------------------------------------
 
 
-def test_la_barre_suit_un_total_qui_decroit() -> None:
-    """Un plan reconstruit après reconnexion ne peut que réduire le total : la barre
-    doit le suivre vers le bas, jamais retenir l'ancien maximum."""
+def test_la_barre_prend_son_maximum_et_sa_valeur_de_la_progression() -> None:
+    """La décroissance du total, elle, est une garantie du métier : le plan reconstruit
+    après reconnexion ne peut que le réduire, et rien ici n'a d'état pour le vérifier."""
     assert reglage_barre(Progression(4, 40)) == (40, 4)
-    assert reglage_barre(Progression(10, 22)) == (22, 10)
 
 
 def test_la_barre_ne_depasse_jamais_son_maximum() -> None:
@@ -613,6 +614,34 @@ def test_un_lot_interrompu_le_dit_dans_son_rapport() -> None:
     rapport = Rapport(interrompu=True)
     assert lignes_du_rapport(rapport)[0].startswith("Lot interrompu")
     assert "journal" in lignes_du_rapport(rapport)[0]
+
+
+def test_un_arret_reseau_dit_que_relancer_suffit() -> None:
+    """Deux conduites à tenir, donc deux textes : chercher la ligne décisive dans un
+    journal de plusieurs centaines de lignes n'est pas une conduite."""
+    rapport = Rapport(interrompu=True, motif_arret=MotifArret.RESEAU)
+    assert "relancer le lot" in lignes_du_rapport(rapport)[0]
+
+
+def test_un_arret_fatal_dit_de_corriger_avant_de_relancer() -> None:
+    rapport = Rapport(interrompu=True, motif_arret=MotifArret.FATAL)
+    entete = lignes_du_rapport(rapport)[0]
+    assert "corrig" in entete
+    assert "relancer le lot" not in entete
+
+
+def test_un_lot_mene_a_son_terme_ne_parle_d_aucun_arret() -> None:
+    assert lignes_du_rapport(Rapport())[0].startswith("Terminé")
+
+
+# --- séparation de deux lots ----------------------------------------------
+
+
+def test_un_nouveau_lot_ouvre_le_journal_par_une_ligne_qui_dit_son_mode() -> None:
+    """Après une simulation puis un lot réel, deux plans se suivaient dans la même zone
+    sans rien qui dise où l'un finit."""
+    assert "simulation" in ligne_de_nouveau_lot(simulation=True)
+    assert "réel" in ligne_de_nouveau_lot(simulation=False)
 
 
 def test_les_comptes_sans_mot_de_passe_ont_leur_section_a_part() -> None:

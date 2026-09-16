@@ -59,6 +59,7 @@ from stormshield_utilisateurs.presentation import (
     libelle_plancher,
     ligne_d_enregistrement,
     ligne_de_message_inconnu,
+    ligne_de_nouveau_lot,
     lignes_de_l_incident,
     lignes_de_la_politique_refusee,
     lignes_du_fichier,
@@ -332,6 +333,10 @@ class Fenetre:
         # qui suivra ne réécrira pas ce qu'il a durci.
         if self.plancher is not None:
             self.politique = politique
+        # Le journal n'est jamais vidé : il n'a aucun autre exemplaire, et l'effacer
+        # emporterait la liste des comptes à reprendre du lot précédent. Cette ligne
+        # dit où le nouveau lot commence.
+        self._ecrire(ligne_de_nouveau_lot(simulation=parametres.simulation))
         self._ecrire_lignes(lignes_du_fichier(utilisateurs, rejets))
         self.bouton_lancer.configure(state=tk.DISABLED)
         self._demarrer(parametres, utilisateurs)

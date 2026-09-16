@@ -33,6 +33,7 @@ from stormshield_utilisateurs.execution import (
 )
 from stormshield_utilisateurs.modele import (
     CompteCree,
+    MotifArret,
     Plan,
     PlancherPolitique,
     PolitiqueMotDePasse,
@@ -434,12 +435,41 @@ def lignes_du_plan(plan: Plan) -> list[str]:
     return lignes
 
 
+def ligne_de_nouveau_lot(*, simulation: bool) -> str:
+    """Sépare deux lancements dans un journal qui n'est jamais vidé.
+
+    Le journal n'a aucun autre exemplaire — pas de fichier, pas de console : l'effacer
+    au lancement suivant emporterait la liste des comptes à reprendre à la main du lot
+    précédent. Il est donc conservé, et c'est cette ligne qui dit où le lot commence.
+    """
+    mode = "simulation" if simulation else "lot réel"
+    return f"───────── nouveau lancement ({mode}) ─────────"
+
+
+def _conduite_apres_arret(motif: MotifArret | None) -> str:
+    """Ce que l'opérateur doit faire, et non le détail de ce qui s'est passé.
+
+    Le journal porte ce détail, mais sur un lot de deux cents comptes il fait des
+    centaines de lignes : y chercher la ligne décisive n'est pas une conduite à tenir.
+    """
+    match motif:
+        case MotifArret.RESEAU:
+            return "La liaison est tombée : relancer le lot suffit, rien à corriger."
+        case MotifArret.FATAL:
+            return (
+                "Une reconnexion n'y changerait rien : corrigez ce que le journal "
+                "ci-dessus indique — identifiants, configuration ou politique de mot "
+                "de passe — avant de relancer."
+            )
+        case None:
+            return "Le motif de l'arrêt est en clair dans le journal ci-dessus."
+
+
 def lignes_du_rapport(rapport: Rapport) -> list[str]:
     """Bilan final.
 
-    `interrompu` distingue le lot mené à son terme de celui qui s'est arrêté ; le
-    détail de l'arrêt — coupure réseau réessayée, ou arrêt définitif qu'aucune
-    reconnexion ne résoudra — est déjà dans le journal, émis par le métier.
+    `interrompu` distingue le lot mené à son terme de celui qui s'est arrêté, et
+    `motif_arret` dit laquelle des deux conduites à tenir s'impose.
     """
     resume = (
         f"{_accord(len(rapport.comptes_crees), 'compte créé', 'comptes créés')}, "
@@ -447,8 +477,8 @@ def lignes_du_rapport(rapport: Rapport) -> list[str]:
         f"{_accord(len(rapport.echecs), 'échec')}."
     )
     entete = (
-        f"Lot interrompu : {resume} Le motif de l'arrêt est en clair dans le journal "
-        "ci-dessus ; ce qui est créé reste créé."
+        f"Lot interrompu : {resume} {_conduite_apres_arret(rapport.motif_arret)} "
+        "Ce qui est créé reste créé."
         if rapport.interrompu
         else f"Terminé : {resume}"
     )
