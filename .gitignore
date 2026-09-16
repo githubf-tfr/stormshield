@@ -5,6 +5,7 @@ __pycache__/
 .coverage
 .superpowers/
 .worktrees/
+.claude/
 .review-tmp/
 
 build/
