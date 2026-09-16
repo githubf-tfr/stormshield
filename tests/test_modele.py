@@ -6,6 +6,7 @@ from stormshield_utilisateurs.modele import (
     CompteCree,
     Echec,
     GroupeACreer,
+    MotifArret,
     Plan,
     PolitiqueMotDePasse,
     Rapport,
@@ -44,3 +45,18 @@ def test_comptes_sans_mot_de_passe_isoles_dans_le_rapport() -> None:
         interrompu=False,
     )
     assert [compte.identifiant for compte in rapport.sans_mot_de_passe] == ["legrand"]
+
+
+def test_un_lot_mene_a_son_terme_n_a_aucun_motif_d_arret() -> None:
+    """`motif_arret` à None est la seule marque d'un lot allé au bout."""
+    rapport = Rapport()
+    assert rapport.interrompu is False
+    assert rapport.motif_arret is None
+
+
+def test_les_deux_motifs_d_arret_sont_distincts() -> None:
+    """Relancer suffit après une coupure réseau ; un arrêt fatal demande une
+    correction. La fenêtre doit pouvoir aiguiller là-dessus sans lire un texte."""
+    apres_coupure = Rapport(interrompu=True, motif_arret=MotifArret.RESEAU)
+    apres_erreur_fatale = Rapport(interrompu=True, motif_arret=MotifArret.FATAL)
+    assert apres_coupure.motif_arret != apres_erreur_fatale.motif_arret

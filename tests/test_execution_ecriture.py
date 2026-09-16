@@ -18,6 +18,7 @@ from stormshield_utilisateurs.execution import (
     executer,
 )
 from stormshield_utilisateurs.modele import (
+    MotifArret,
     PlancherPolitique,
     PolitiqueMotDePasse,
     Rapport,
@@ -565,6 +566,79 @@ def test_la_simulation_refuse_aussi_une_politique_sous_le_plancher() -> None:
 def test_une_politique_qui_tient_le_plancher_ne_refuse_rien() -> None:
     _, evenements = _lancer(BoitierMemoire(), [_utilisateur("dupont")])
     assert not any(isinstance(evenement, PolitiqueRefusee) for evenement in evenements)
+
+
+def test_un_lot_mene_a_son_terme_ne_porte_aucun_motif_d_arret() -> None:
+    rapport, _ = _lancer(BoitierMemoire(), [_utilisateur("dupont")])
+    assert rapport.interrompu is False
+    assert rapport.motif_arret is None
+
+
+def test_une_coupure_reseau_irrecuperable_est_un_arret_reseau() -> None:
+    """Relancer le lot suffit : le motif doit le dire sans qu'on lise le journal,
+    qui fait des centaines de lignes sur un lot de deux cents comptes."""
+    boitier = BoitierMemoire()
+
+    def couper_toujours(operation: str, _cible: str) -> None:
+        if operation in {"creer_utilisateur", "connecter"} and boitier.connexions >= 1:
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_toujours
+    rapport, _ = _lancer(boitier, [_utilisateur("dupont")])
+    assert rapport.interrompu is True
+    assert rapport.motif_arret is MotifArret.RESEAU
+
+
+def test_une_relecture_impossible_est_un_arret_reseau() -> None:
+    boitier = BoitierMemoire()
+
+    def couper(operation: str, _cible: str) -> None:
+        if operation == "creer_utilisateur":
+            raise ErreurReseau("liaison perdue")
+        if operation == "lister_utilisateurs" and boitier.connexions >= 2:
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper
+    rapport, _ = _lancer(boitier, [_utilisateur("dupont")])
+    assert rapport.motif_arret is MotifArret.RESEAU
+
+
+def test_une_erreur_fatale_est_un_arret_fatal() -> None:
+    """L'opérateur doit corriger quelque chose : relancer tel quel ne donnerait rien."""
+    boitier = BoitierMemoire()
+
+    def refuser_l_authentification(operation: str, _cible: str) -> None:
+        if operation == "connecter":
+            raise ErreurFatale("authentification refusée")
+
+    boitier.declencheur = refuser_l_authentification
+    rapport, _ = _lancer(boitier, [_utilisateur("dupont")])
+    assert rapport.interrompu is True
+    assert rapport.motif_arret is MotifArret.FATAL
+
+
+def test_une_politique_refusee_est_un_arret_fatal() -> None:
+    """Il y a quelque chose à corriger avant de relancer : la politique."""
+    boitier = BoitierMemoire(
+        plancher=PlancherPolitique(longueur_min=24, nombre_classes_min=4, entropie_min=0)
+    )
+    rapport, _ = _lancer(boitier, [_utilisateur("dupont")])
+    assert rapport.motif_arret is MotifArret.FATAL
+
+
+def test_interrompu_et_motif_d_arret_restent_coherents() -> None:
+    """Les deux champs disent la même chose : un motif posé implique un lot interrompu."""
+    boitier = BoitierMemoire()
+
+    def couper_toujours(operation: str, _cible: str) -> None:
+        if operation in {"creer_utilisateur", "connecter"} and boitier.connexions >= 1:
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_toujours
+    interrompu, _ = _lancer(boitier, [_utilisateur("dupont")])
+    complet, _ = _lancer(BoitierMemoire(), [_utilisateur("dupont")])
+    for rapport in (interrompu, complet):
+        assert rapport.interrompu is (rapport.motif_arret is not None)
 
 
 def test_bascule_en_minuscules_signalee_au_journal() -> None:

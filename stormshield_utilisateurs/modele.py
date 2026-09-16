@@ -1,6 +1,7 @@
 """Structures de données partagées. Aucune logique de décision, aucun accès réseau."""
 
 from dataclasses import dataclass, field
+from enum import Enum, auto
 
 
 @dataclass(frozen=True)
@@ -97,12 +98,27 @@ class Echec:
     motif: str
 
 
+class MotifArret(Enum):
+    """Pourquoi le lot s'est arrêté. Deux conduites à tenir, donc deux valeurs.
+
+    Le journal porte le détail, mais sur un lot de deux cents comptes il fait des
+    centaines de lignes : y chercher la ligne décisive n'est pas un aiguillage.
+    """
+
+    RESEAU = auto()  # la liaison est tombée : relancer le lot suffit
+    FATAL = auto()  # l'opérateur doit corriger quelque chose avant de relancer
+
+
 @dataclass
 class Rapport:
+    """`motif_arret` vaut None quand le lot est allé au bout ; il accompagne toujours
+    `interrompu`, qui reste le fait brut « ce lot n'est pas allé au bout »."""
+
     comptes_crees: list[CompteCree] = field(default_factory=list)
     echecs: list[Echec] = field(default_factory=list)
     groupes_crees: list[str] = field(default_factory=list)
     interrompu: bool = False
+    motif_arret: MotifArret | None = None
 
     @property
     def sans_mot_de_passe(self) -> list[CompteCree]:

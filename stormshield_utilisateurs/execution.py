@@ -18,6 +18,7 @@ from stormshield_utilisateurs.modele import (
     CompteCree,
     Echec,
     EtatBoitier,
+    MotifArret,
     Plan,
     PlancherPolitique,
     PolitiqueMotDePasse,
@@ -361,8 +362,16 @@ def _appliquer(
             emettre(PlanPret(reste))
 
 
-def _arreter(rapport: Rapport, emettre: Emetteur, motif: str) -> None:
+def _marquer_arret(rapport: Rapport, motif: MotifArret) -> None:
+    """Les deux marques d'arrêt se posent ensemble : `interrompu` dit qu'il y a eu
+    arrêt, `motif_arret` dit lequel. Aucune ne se pose sans l'autre."""
     rapport.interrompu = True
+    rapport.motif_arret = motif
+
+
+def _arreter(rapport: Rapport, emettre: Emetteur, motif: str) -> None:
+    """Liaison perdue et non rattrapée : relancer le lot suffit, rien à corriger."""
+    _marquer_arret(rapport, MotifArret.RESEAU)
     emettre(
         Journal(
             f"arrêt : {motif}. Ce qui est créé reste créé, "
@@ -375,7 +384,7 @@ def _arreter_fatal(rapport: Rapport, emettre: Emetteur, erreur: ErreurFatale) ->
     """Arrêt immédiat, sans aucune reconnexion : contrairement à une liaison perdue,
     une ErreurFatale ne se résoudra pas en rejouant la même connexion — la répéter
     ne ferait qu'alimenter le verrouillage anti-bruteforce du boîtier."""
-    rapport.interrompu = True
+    _marquer_arret(rapport, MotifArret.FATAL)
     emettre(
         Journal(
             f"arrêt définitif : {erreur}. Une reconnexion n'y changerait rien : "
@@ -397,7 +406,7 @@ def _arreter_politique(
     Comme l'arrêt fatal, il ne se résout pas en relançant tel quel — d'où le même
     traitement au rapport.
     """
-    rapport.interrompu = True
+    _marquer_arret(rapport, MotifArret.FATAL)
     emettre(PolitiqueRefusee(manquements, plancher))
     emettre(
         Journal(
