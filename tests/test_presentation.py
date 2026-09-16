@@ -49,8 +49,10 @@ from stormshield_utilisateurs.presentation import (
     Parametres,
     ParametresAnnuaire,
     PompeEvenements,
+    avertissement_perte_de_secrets,
     est_terminal,
     libelle_plancher,
+    ligne_d_enregistrement,
     lignes_de_la_politique_refusee,
     lignes_du_fichier,
     lignes_du_plan,
@@ -285,11 +287,91 @@ def test_la_politique_refusee_laisse_la_pompe_tourner() -> None:
 # --- comptes enregistrables -----------------------------------------------
 
 
-def test_le_bouton_s_active_des_la_premiere_creation() -> None:
+def test_un_compte_ajoute_est_aussitot_enregistrable() -> None:
+    """Compte par compte : sur un lot de deux cents, le premier suffit à avoir de quoi
+    écrire. L'activation du bouton, elle, est dans la fenêtre — non couverte ici."""
     enregistrables = ComptesEnregistrables()
     assert not enregistrables.comptes
     enregistrables.ajouter(CompteCree("dupont", "s3cr3t"))
     assert enregistrables.comptes == (CompteCree("dupont", "s3cr3t"),)
+
+
+def test_un_mot_de_passe_jamais_ecrit_reste_en_attente() -> None:
+    """Ces secrets n'existent que dans la mémoire du processus : rien ne les recrée."""
+    enregistrables = ComptesEnregistrables()
+    assert enregistrables.secrets_en_attente == 0
+    enregistrables.ajouter(CompteCree("dupont", "s3cr3t"))
+    enregistrables.ajouter(CompteCree("martin", "aut3r"))
+    assert enregistrables.secrets_en_attente == 2
+
+
+def test_un_compte_sans_mot_de_passe_n_a_aucun_secret_a_perdre() -> None:
+    enregistrables = ComptesEnregistrables()
+    enregistrables.ajouter(CompteCree("dupont", ""))
+    assert enregistrables.secrets_en_attente == 0
+
+
+def test_l_ecriture_du_csv_solde_l_attente() -> None:
+    enregistrables = ComptesEnregistrables()
+    enregistrables.ajouter(CompteCree("dupont", "s3cr3t"))
+    enregistrables.marquer_enregistres()
+    assert enregistrables.secrets_en_attente == 0
+
+
+def test_un_compte_cree_apres_l_ecriture_du_csv_rouvre_l_attente() -> None:
+    """Le lot continue après un enregistrement en cours de route : ce qui suit n'est
+    dans aucun fichier."""
+    enregistrables = ComptesEnregistrables()
+    enregistrables.ajouter(CompteCree("dupont", "s3cr3t"))
+    enregistrables.marquer_enregistres()
+    enregistrables.ajouter(CompteCree("martin", "aut3r"))
+    assert enregistrables.secrets_en_attente == 1
+
+
+def test_le_rapport_final_rouvre_l_attente() -> None:
+    """`fixer` remplace la liste : ce qu'elle porte n'a pas été écrit sous cette forme."""
+    enregistrables = ComptesEnregistrables()
+    enregistrables.ajouter(CompteCree("dupont", "s3cr3t"))
+    enregistrables.marquer_enregistres()
+    enregistrables.fixer([CompteCree("dupont", "s3cr3t")])
+    assert enregistrables.secrets_en_attente == 1
+
+
+def test_la_reinitialisation_vide_la_liste_et_l_attente() -> None:
+    """Au démarrage d'un lot : sans cela, l'export mélangerait deux lots."""
+    enregistrables = ComptesEnregistrables()
+    enregistrables.ajouter(CompteCree("dupont", "s3cr3t"))
+    enregistrables.reinitialiser()
+    assert enregistrables.comptes == ()
+    assert enregistrables.secrets_en_attente == 0
+
+
+def test_l_avertissement_de_perte_dit_le_nombre_et_l_irreversible() -> None:
+    texte = avertissement_perte_de_secrets(200)
+    assert "200 mots de passe" in texte
+    assert "créés" in texte  # les comptes, eux, restent sur le firewall
+    assert texte.endswith("Lancer quand même ?")
+
+
+def test_l_avertissement_de_perte_s_accorde_au_singulier() -> None:
+    assert "1 mot de passe n'a pas" in avertissement_perte_de_secrets(1)
+
+
+def test_l_enregistrement_compte_a_part_les_comptes_sans_mot_de_passe() -> None:
+    """« N mots de passe enregistrés » mentait dès qu'un USER PASSWORD avait échoué."""
+    ligne = ligne_d_enregistrement(
+        (CompteCree("dupont", "s3cr3t"), CompteCree("martin", "")), "C:/lot.csv"
+    )
+    assert "2 comptes écrits" in ligne
+    assert "1 mot de passe enregistré" in ligne
+    assert "1 compte sans mot de passe" in ligne
+    assert "C:/lot.csv" in ligne
+
+
+def test_l_enregistrement_sans_compte_muet_ne_parle_que_des_mots_de_passe() -> None:
+    ligne = ligne_d_enregistrement((CompteCree("dupont", "s3cr3t"),), "lot.csv")
+    assert "sans mot de passe" not in ligne
+    assert "1 mot de passe enregistré" in ligne
 
 
 def test_le_rapport_final_fait_foi_sur_ce_qui_sera_ecrit() -> None:

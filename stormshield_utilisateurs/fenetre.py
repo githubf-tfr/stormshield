@@ -49,7 +49,9 @@ from stormshield_utilisateurs.presentation import (
     ParametresAnnuaire,
     PompeEvenements,
     Publieur,
+    avertissement_perte_de_secrets,
     libelle_plancher,
+    ligne_d_enregistrement,
     lignes_de_la_politique_refusee,
     lignes_du_fichier,
     lignes_du_plan,
@@ -77,7 +79,6 @@ class Fenetre:
     def __init__(self) -> None:
         self.racine = tk.Tk()
         self.racine.title(TITRE)
-        self.file: queue.Queue[MessageFil] = queue.Queue()
         # None tant qu'aucune connexion n'a renseigné le plancher du boîtier : c'est
         # ce qui grise les champs de politique et interdit d'écrire.
         self.politique: PolitiqueMotDePasse | None = None
@@ -290,6 +291,8 @@ class Fenetre:
         except OSError as erreur:
             messagebox.showerror("Fichier illisible", str(erreur), parent=self.racine)
             return
+        if not self._confirmer_la_perte_des_secrets():
+            return
         # Le choix de l'opérateur devient la politique courante : la lecture du boîtier
         # qui suivra ne réécrira pas ce qu'il a durci.
         if self.plancher is not None:
@@ -298,15 +301,37 @@ class Fenetre:
         self.bouton_lancer.configure(state=tk.DISABLED)
         self._demarrer(parametres, utilisateurs)
 
+    def _confirmer_la_perte_des_secrets(self) -> bool:
+        """Dernier rempart avant qu'un nouveau lot efface les mots de passe du précédent.
+
+        Les comptes existent déjà sur le boîtier : un relancement les classera « déjà
+        présent, ignoré » et ne leur redonnera jamais de mot de passe.
+        """
+        en_attente = self.enregistrables.secrets_en_attente
+        if not en_attente:
+            return True
+        return messagebox.askyesno(
+            "Mots de passe non enregistrés",
+            avertissement_perte_de_secrets(en_attente),
+            icon=messagebox.WARNING,
+            default=messagebox.NO,
+            parent=self.racine,
+        )
+
     def _demarrer(self, parametres: Parametres, utilisateurs: list[Utilisateur]) -> None:
-        self.file = queue.Queue()
+        # Le lot précédent est soldé : sa liste ne doit pas se mélanger à celle-ci, et
+        # le bouton ne doit pas rester actif sur un contenu qui vient d'être vidé.
+        self.enregistrables.reinitialiser()
+        self.bouton_enregistrer.configure(state=tk.DISABLED)
+        # Variable locale : rien de `self` ne doit voyager jusqu'au fil.
+        file: queue.Queue[MessageFil] = queue.Queue()
         fil = threading.Thread(
             target=travailler,
-            args=(parametres, utilisateurs, self.file.put),
+            args=(parametres, utilisateurs, file.put),
             daemon=True,
         )
         fil.start()
-        self._pomper(self.file, self._appliquer)
+        self._pomper(file, self._appliquer)
 
     def _pomper(self, file: "queue.Queue[MessageFil]", appliquer: Publieur) -> None:
         PompeEvenements(file, appliquer, self._planifier).tour()
@@ -402,7 +427,10 @@ class Fenetre:
         except OSError as erreur:
             messagebox.showerror("Écriture impossible", str(erreur), parent=self.racine)
             return
-        self._ecrire(f"{len(comptes)} mots de passe enregistrés dans {chemin}")
+        # Marqué seulement ici : tant que le fichier n'est pas écrit, les secrets sont
+        # toujours en mémoire et un nouveau lot doit encore être confirmé.
+        self.enregistrables.marquer_enregistres()
+        self._ecrire(ligne_d_enregistrement(comptes, chemin))
 
     # --- création de l'annuaire ------------------------------------------
 

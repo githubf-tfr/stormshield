@@ -254,20 +254,66 @@ class ComptesEnregistrables:
     Alimenté compte par compte, pour que le bouton s'active dès la première création
     et non à la fin d'un lot de deux cents comptes. Le rapport final le remplace : il
     fait foi sur ce qui a réellement été créé, mots de passe vides compris.
+
+    Porte aussi le seul fait qui distingue un secret perdu d'un secret sauvé : ces mots
+    de passe n'existent que dans la mémoire du processus. Les comptes, eux, existent sur
+    le boîtier et un relancement les classera « déjà présent, ignoré » à jamais.
     """
 
     def __init__(self) -> None:
         self._comptes: list[CompteCree] = []
+        # Nombre de comptes de tête déjà écrits dans un fichier. La liste ne fait que
+        # croître entre deux `fixer`, donc ce rang suffit à dire ce qui reste en mémoire.
+        self._deja_ecrits = 0
 
     @property
     def comptes(self) -> tuple[CompteCree, ...]:
         return tuple(self._comptes)
 
+    @property
+    def secrets_en_attente(self) -> int:
+        """Combien de mots de passe seraient perdus maintenant. Zéro = rien à perdre.
+
+        Un compte créé sans mot de passe utilisable n'a aucun secret à perdre : il est
+        déjà à reprendre à la main, et le rapport le dit dans sa propre section.
+        """
+        return sum(1 for compte in self._comptes[self._deja_ecrits :] if compte.mot_de_passe)
+
     def ajouter(self, compte: CompteCree) -> None:
         self._comptes.append(compte)
 
     def fixer(self, comptes: Sequence[CompteCree]) -> None:
+        # Le rapport peut porter un mot de passe là où l'écriture en cours de lot avait
+        # vu un compte encore muet : rien de cette liste-ci n'est réputé écrit.
         self._comptes = list(comptes)
+        self._deja_ecrits = 0
+
+    def marquer_enregistres(self) -> None:
+        """À n'appeler qu'après une écriture de fichier réussie."""
+        self._deja_ecrits = len(self._comptes)
+
+    def reinitialiser(self) -> None:
+        """Au démarrage effectif d'un lot : sans cela, un export mélangerait deux lots."""
+        self._comptes = []
+        self._deja_ecrits = 0
+
+
+def avertissement_perte_de_secrets(nombre: int) -> str:
+    """Ce que l'opérateur doit lire avant qu'un nouveau lot efface des secrets.
+
+    Aucun relancement ne les reconstitue : les comptes existent déjà sur le boîtier, le
+    plan suivant les classera « déjà présent, ignoré » et ils resteront sans mot de
+    passe connu.
+    """
+    sujet = _accord(nombre, "mot de passe", "mots de passe")
+    verbe = "n'a pas été enregistré" if nombre <= 1 else "n'ont pas été enregistrés"
+    return (
+        f"{sujet} {verbe} dans un fichier.\n\n"
+        "Lancer un nouveau lot les efface définitivement. Les comptes, eux, restent "
+        "créés sur le firewall : aucun relancement ne leur redonnera de mot de passe, "
+        "ils seront classés « déjà présent, ignoré ».\n\n"
+        "Lancer quand même ?"
+    )
 
 
 def _accord(nombre: int, singulier: str, pluriel: str | None = None) -> str:
@@ -328,6 +374,25 @@ def lignes_du_rapport(rapport: Rapport) -> list[str]:
         lignes.append("Comptes créés sans mot de passe — à reprendre")
         lignes.extend(compte.identifiant for compte in sans_secret)
     return lignes
+
+
+def ligne_d_enregistrement(comptes: Sequence[CompteCree], chemin: str) -> str:
+    """Bilan de l'écriture du CSV. Deux nombres, jamais un seul.
+
+    Le CSV porte une ligne par compte créé, mot de passe vide compris : annoncer
+    « N mots de passe enregistrés » ferait croire à N secrets récupérables.
+    """
+    avec_secret = sum(1 for compte in comptes if compte.mot_de_passe)
+    sans_secret = len(comptes) - avec_secret
+    ligne = (
+        f"{_accord(len(comptes), 'compte écrit', 'comptes écrits')} dans {chemin}, "
+        f"{_accord(avec_secret, 'mot de passe enregistré', 'mots de passe enregistrés')}"
+    )
+    if sans_secret:
+        ligne += (
+            f", {_accord(sans_secret, 'compte sans mot de passe', 'comptes sans mot de passe')}"
+        )
+    return ligne
 
 
 def boitier_de_la_connexion(connexion: Connexion) -> Boitier:
