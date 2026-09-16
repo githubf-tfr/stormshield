@@ -1,33 +1,80 @@
 """L'adaptateur n'est prouvé par rien tant qu'aucun boîtier n'est joignable.
 Seules les parties textuelles se testent hors ligne."""
 
-import pytest
+from typing import Any
 
-from stormshield_utilisateurs.boitier import Boitier
+import pytest
+import requests
+from stormshield.sns.sslclient import (
+    AuthenticationError,
+    ConfigParser,
+    MissingCABundle,
+    MissingHost,
+    ServerError,
+    TOTPNeededError,
+)
+
+from stormshield_utilisateurs.boitier import Boitier, ErreurFatale, ErreurReseau
 from stormshield_utilisateurs.boitier_sdk import (
     BoitierSDK,
+    _lignes,
+    _sans_secret,
+    _section_unique,
     commande_ajouter_membre,
     commande_creer_groupe,
     commande_creer_utilisateur,
     lire_plancher,
 )
 
-# Ligne de type, jamais un test : c'est mypy, pas pytest, qui prouve ici que BoitierSDK
-# satisfait structurellement le Protocol Boitier. Un `assert ... is not None` à l'exécution
-# ne prouverait rien qu'une réussite systématique ; l'annotation ci-dessous, elle, échoue
-# la vérification statique si une méthode du Protocol manque ou diverge.
-_conforme_au_protocol: Boitier = BoitierSDK("10.0.0.1", "admin", "secret-factice")
+
+def _conformite_au_protocol(adaptateur: BoitierSDK) -> Boitier:
+    """Ligne de type, jamais un test : c'est mypy, pas pytest, qui prouve ici que BoitierSDK
+    satisfait structurellement le Protocol Boitier — la vérification statique échoue si une
+    méthode du Protocol manque ou diverge. Une fonction annotée le prouve autant qu'une
+    instance, sans coder d'adresse ni d'identifiants dans le dépôt."""
+    return adaptateur
+
+
+class _ReponseFactice:
+    """Réponse du SDK reconstituée : `ConfigParser` est celui du SDK installé, appliqué au
+    texte `output` que produit `format_output`. Les types de `.data` sont donc les vrais
+    (`CaseInsensitiveDict`), pas des `dict` de test qui masqueraient le défaut."""
+
+    def __init__(self, sortie: str) -> None:
+        analyseur = ConfigParser(sortie)
+        self.data: Any = analyseur.data
+        self.format: str = analyseur.format
+
+
+def _reponse_section_line(titre: str, lignes: list[str]) -> _ReponseFactice:
+    corps = "".join(f"{ligne}\n" for ligne in lignes)
+    return _ReponseFactice(
+        f'100 code=00a01000 msg="Ok" format="section_line"\n[{titre}]\n{corps}'
+    )
+
+
+def _reponse_section(titre: str, cles: list[str]) -> _ReponseFactice:
+    corps = "".join(f"{cle}\n" for cle in cles)
+    return _ReponseFactice(f'100 code=00a01000 msg="Ok" format="section"\n[{titre}]\n{corps}')
 
 
 def test_commande_de_creation_d_utilisateur() -> None:
     assert commande_creer_utilisateur("dupont", "Dupont", "Marie", "interne.local") == (
-        "USER CREATE uid=dupont name=Dupont gname=Marie domainname=interne.local"
+        'USER CREATE uid=dupont name="Dupont" gname="Marie" domainname=interne.local'
     )
 
 
 def test_prenom_vide_omet_gname() -> None:
     assert commande_creer_utilisateur("dupont", "Dupont", "", "interne.local") == (
-        "USER CREATE uid=dupont name=Dupont domainname=interne.local"
+        'USER CREATE uid=dupont name="Dupont" domainname=interne.local'
+    )
+
+
+def test_nom_compose_reste_un_seul_jeton() -> None:
+    """Sans guillemets, `De La Tour` donnerait trois jetons au boîtier, qui découperait la
+    commande autrement et sans rien signaler."""
+    assert commande_creer_utilisateur("dupont", "De La Tour", "Jean Marie", "interne") == (
+        'USER CREATE uid=dupont name="De La Tour" gname="Jean Marie" domainname=interne'
     )
 
 
@@ -35,24 +82,206 @@ def test_nom_de_groupe_transmis_verbatim_entre_guillemets() -> None:
     assert commande_creer_groupe("compta bis") == 'USER GROUP CREATE "compta bis"'
 
 
-def test_commande_d_appartenance() -> None:
-    assert commande_ajouter_membre("compta", "dupont") == "USER GROUP ADDUSER compta dupont"
+def test_appartenance_cite_le_groupe_comme_la_creation() -> None:
+    """Citer à la création et pas au rattachement rendait « compta bis » inadressable."""
+    assert commande_creer_groupe("compta bis").endswith('"compta bis"')
+    assert commande_ajouter_membre("compta bis", "dupont") == (
+        'USER GROUP ADDUSER "compta bis" dupont'
+    )
 
 
 def test_lecture_du_plancher_de_politique() -> None:
-    donnees = {"MinLength": "12", "MinSetOfChars": "3", "MinEntropy": "40"}
+    """`MinSetOfChars` est un mot-clé, jamais un entier : c'est la forme que rend le boîtier."""
+    donnees = {"MinLength": "12", "MinSetOfChars": "AlphaNum", "MinEntropy": "40"}
     plancher = lire_plancher(donnees)
     assert (plancher.longueur_min, plancher.nombre_classes_min, plancher.entropie_min) == (
         12,
-        3,
+        2,
         40,
     )
+
+
+@pytest.mark.parametrize(
+    ("brut", "attendu"), [("None", 1), ("AlphaNum", 2), ("AlphaSpecial", 3), ("alphanum", 2)]
+)
+def test_traduction_des_jeux_de_caracteres(brut: str, attendu: int) -> None:
+    assert lire_plancher({"MinSetOfChars": brut}).nombre_classes_min == attendu
+
+
+def test_un_entier_reste_accepte() -> None:
+    """Au cas où un boîtier en rende un."""
+    assert lire_plancher({"MinSetOfChars": "3"}).nombre_classes_min == 3
+
+
+def test_jeu_de_caracteres_inconnu_leve_au_lieu_de_retomber_sur_zero() -> None:
+    """Un plancher incompris n'est pas un plancher nul : l'adaptateur n'a pas à effacer le
+    garde-fou dans la direction inverse de sa raison d'être."""
+    with pytest.raises(ErreurFatale):
+        lire_plancher({"MinSetOfChars": "AlphaNumSpecialInedit"})
+
+
+def test_longueur_illisible_leve() -> None:
+    with pytest.raises(ErreurFatale):
+        lire_plancher({"MinLength": "illisible"})
 
 
 def test_plancher_absent_retombe_sur_zero() -> None:
     """Un boîtier sans politique déclarée ne doit pas faire planter la lecture."""
     plancher = lire_plancher({})
     assert (plancher.longueur_min, plancher.nombre_classes_min) == (0, 0)
+
+
+def test_les_lignes_d_une_vraie_reponse_sont_lues() -> None:
+    """`.data` est une `CaseInsensitiveDict`, qui ne dérive pas de `dict` : un garde
+    `isinstance(..., dict)` rendait une liste vide, donc un boîtier vu comme vierge et tout
+    recréé à chaque passage — l'idempotence était rompue."""
+    reponse = _reponse_section_line("Result", ["id=1 name=dupont", "id=2 name=martin"])
+    assert not isinstance(reponse.data, dict)
+    assert [ligne["name"] for ligne in _lignes(reponse)] == ["dupont", "martin"]
+
+
+def test_la_section_d_une_vraie_reponse_est_lue() -> None:
+    """Deux couches de `CaseInsensitiveDict` : `.data`, puis la valeur de la section."""
+    reponse = _reponse_section(
+        "PasswordPolicy", ["MinLength=12", "MinSetOfChars=AlphaNum", "MinEntropy=20"]
+    )
+    assert not isinstance(reponse.data["PasswordPolicy"], dict)
+    plancher = lire_plancher(_section_unique(reponse))
+    assert (plancher.longueur_min, plancher.nombre_classes_min, plancher.entropie_min) == (
+        12,
+        2,
+        20,
+    )
+
+
+def test_une_reponse_brute_ne_fait_pas_planter_la_lecture() -> None:
+    """`format="raw"` rend une chaîne, pas un Mapping."""
+    reponse = _ReponseFactice('100 code=00a01000 msg="Ok" format="raw"\ntexte libre\n')
+    assert _lignes(reponse) == []
+    assert _section_unique(reponse) == {}
+
+
+def test_le_mot_de_passe_encode_est_masque() -> None:
+    """Le SDK encode `=` en `%3D` dans l'URL, et `requests` recopie cette URL dans le message
+    de son exception : chercher la seule forme littérale laissait fuir le secret."""
+    url = "...&cmd=USER%20PASSWORD%20dn%3Ddupont%20password%3DSECRET-42 (Caused by ...)"
+    masque = _sans_secret(url)
+    assert "SECRET-42" not in masque
+    assert "password%3D***" in masque
+    assert "(Caused by ...)" in masque
+
+
+def test_le_mot_de_passe_en_clair_reste_masque() -> None:
+    assert _sans_secret("USER PASSWORD dn=dupont password=SECRET-42") == (
+        "USER PASSWORD dn=dupont password=***"
+    )
+
+
+class _ClientFactice:
+    """Tient la place de SSLClient. Aucun réseau : la fabrique est injectée."""
+
+    def __init__(self, panne_a_l_envoi: Exception | None = None) -> None:
+        self.panne_a_l_envoi = panne_a_l_envoi
+        self.deconnexions = 0
+
+    def send_command(self, commande: str) -> Any:
+        del commande
+        if self.panne_a_l_envoi is not None:
+            raise self.panne_a_l_envoi
+        return _reponse_section_line("Result", ["name=dupont"])
+
+    def disconnect(self) -> None:
+        self.deconnexions += 1
+
+
+# Rien d'exploitable n'est codé ici : `.invalid` est un domaine de premier niveau réservé
+# (RFC 2606), jamais résolvable, et la fabrique injectée n'atteint aucun réseau. Ni
+# utilisateur ni mot de passe ne sont renseignés — la fabrique factice les ignore.
+HOTE_INEXISTANT = "boitier.invalid"
+SANS_IDENTITE = ""
+
+
+def _adaptateur(client: _ClientFactice) -> BoitierSDK:
+    boitier = BoitierSDK(
+        HOTE_INEXISTANT, SANS_IDENTITE, SANS_IDENTITE, fabrique_client=lambda **_: client
+    )
+    boitier.connecter()
+    return boitier
+
+
+@pytest.mark.parametrize(
+    ("levee", "attendue"),
+    [
+        (AuthenticationError("mot de passe refusé"), ErreurFatale),
+        (TOTPNeededError("TOTP is needed"), ErreurFatale),
+        (MissingHost("Host parameter must be provided"), ErreurFatale),
+        (MissingCABundle("bundle absent"), ErreurFatale),
+        # Session invalide ou expirée : une reconnexion la résout, donc on réessaie.
+        (ServerError("Expired session"), ErreurReseau),
+        (requests.exceptions.ConnectionError("liaison coupée"), ErreurReseau),
+    ],
+)
+def test_taxonomie_des_erreurs_de_connexion(levee: Exception, attendue: type) -> None:
+    """Un mot de passe faux rangé en « on réessaie » faisait reconnecter l'outil en boucle,
+    et cette boucle alimentait le verrouillage anti-bruteforce du boîtier."""
+
+    def fabrique_en_panne(**_: Any) -> Any:
+        raise levee
+
+    boitier = BoitierSDK(
+        HOTE_INEXISTANT, SANS_IDENTITE, SANS_IDENTITE, fabrique_client=fabrique_en_panne
+    )
+    with pytest.raises(attendue):
+        boitier.connecter()
+
+
+def test_authentification_refusee_en_cours_de_lot_est_fatale() -> None:
+    """`send_command` lève AuthenticationError sur le code serverd 205."""
+    boitier = _adaptateur(_ClientFactice(AuthenticationError("Authentication error")))
+    with pytest.raises(ErreurFatale):
+        boitier.lister_utilisateurs()
+
+
+def test_un_defaut_de_code_ne_se_deguise_pas_en_perte_de_liaison() -> None:
+    """Un `except Exception` nu faisait reconnecter l'appelant sur une AttributeError."""
+    boitier = _adaptateur(_ClientFactice(AttributeError("défaut de l'adaptateur")))
+    with pytest.raises(AttributeError):
+        boitier.lister_utilisateurs()
+
+
+def test_le_secret_ne_survit_pas_dans_la_chaine_des_causes() -> None:
+    """Le message de `requests` porte l'URL, donc le mot de passe encodé : ni le message
+    rendu ni `__cause__` ne doivent le laisser réapparaître dans une trace d'appel."""
+    fuite = requests.exceptions.ConnectionError(
+        "Max retries exceeded with url: /api/command?cmd=USER%20PASSWORD%20password%3DSECRET-42"
+    )
+    boitier = _adaptateur(_ClientFactice(fuite))
+    with pytest.raises(ErreurReseau) as capture:
+        boitier.definir_mot_de_passe("dupont", "SECRET-42")
+    assert "SECRET-42" not in str(capture.value)
+    assert capture.value.__cause__ is None
+    # Le type de l'origine reste lisible : couper la chaîne ne coûte pas le diagnostic.
+    assert "ConnectionError" in str(capture.value)
+
+
+def test_reconnecter_ferme_la_session_precedente() -> None:
+    """Sans cela chaque reconnexion laissait une session ouverte sur le boîtier, jusqu'à
+    la limite d'authentification."""
+    client = _ClientFactice()
+    boitier = _adaptateur(client)
+    boitier.connecter()
+    assert client.deconnexions == 1
+
+
+def test_deconnecter_ne_leve_jamais() -> None:
+    """Appelée depuis un `finally`, une déconnexion qui lève remplace l'erreur en cours."""
+
+    class _LogoutEnPanne(_ClientFactice):
+        def disconnect(self) -> None:
+            raise requests.exceptions.ConnectionError("logout injoignable")
+
+    boitier = _adaptateur(_LogoutEnPanne())
+    boitier.deconnecter()
 
 
 @pytest.mark.firewall
