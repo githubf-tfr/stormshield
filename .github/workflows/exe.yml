@@ -31,7 +31,12 @@ jobs:
           python-version: "3.12"
 
       - name: Installer le projet et ses outils
-        run: pip install -e '.[dev]'
+        # Installation normale, jamais éditable : une installation éditable passe par
+        # un chercheur de modules posé par un fichier `.pth`, que PyInstaller peut ne
+        # pas suivre — le paquet ne serait alors pas collecté dans le `.exe`. C'est le
+        # mode d'échec le plus probable de cette construction, et personne ne peut le
+        # constater avant le premier tag.
+        run: pip install '.[dev]'
 
       - name: Construire l'exécutable
         # --onefile : un seul fichier à déposer sur le poste de l'opérateur.
