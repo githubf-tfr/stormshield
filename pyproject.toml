@@ -23,7 +23,8 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "N", "SIM", "ARG", "PTH", "RUF"]
 # RUF001-003 signalent les caractères Unicode ambigus : le code est en français et
 # les accents ne doivent pas être traités comme des anomalies.
-ignore = ["RUF001", "RUF002", "RUF003"]
+# N818 impose une Exception *suffixe* par Error, mais le français préfixe par Erreur.
+ignore = ["RUF001", "RUF002", "RUF003", "N818"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -16,7 +16,7 @@ SEPARATEUR_GROUPES = "|"
 IDENTIFIANT_VALIDE = re.compile(r"^[a-z0-9._-]+$")
 
 
-class ColonnesManquantes(Exception):  # noqa: N818 -- nom de contrat imposé par la spec
+class ColonnesManquantes(Exception):
     """Erreur de structure : le fichier entier est refusé, aucune ligne n'est lue."""
 
     def __init__(self, colonnes: tuple[str, ...]) -> None:

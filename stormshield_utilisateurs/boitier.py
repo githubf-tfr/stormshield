@@ -5,7 +5,7 @@ from typing import Protocol
 from stormshield_utilisateurs.modele import PlancherPolitique
 
 
-class ErreurBoitier(Exception):  # noqa: N818 — français : « Erreur » préfixe, pas suffixe.
+class ErreurBoitier(Exception):
     """Racine des erreurs du dialogue avec le boîtier."""
 
 
