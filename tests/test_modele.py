@@ -1,6 +1,6 @@
 """Comportements portés par le modèle : ils sont peu nombreux mais chacun est une règle."""
 
-from conftest import utilisateur
+from fabriques import utilisateur
 
 from stormshield_utilisateurs.modele import (
     CompteCree,
