@@ -5,7 +5,7 @@ import pytest
 import stormshield_utilisateurs
 
 
-def test_le_paquet_est_importable() -> None:
+def test_le_paquet_a_une_docstring() -> None:
     assert stormshield_utilisateurs.__doc__ is not None
 
 
