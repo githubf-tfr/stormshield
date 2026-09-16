@@ -464,14 +464,20 @@ def test_deconnecter_ne_leve_jamais() -> None:
 @pytest.mark.firewall
 def test_connexion_a_un_boitier_reel() -> None:
     """Exclu par défaut. À exécuter avec `pytest -m firewall` et des identifiants fournis
-    par variables d'environnement, jamais en dur."""
+    par variables d'environnement, jamais en dur.
+
+    `SNS_VERIFIER_CERTIFICAT=0` contourne la vérification du certificat, pour un boîtier
+    à certificat auto-signé. Le contournement était câblé en dur ici — le seul endroit
+    du dépôt où il l'était, alors que le produit entier tient à ce qu'il ne le soit
+    jamais. Il se lit comme les autres paramètres, et la vérification reste le défaut.
+    """
     import os
 
     boitier = BoitierSDK(
         hote=os.environ["SNS_HOTE"],
         utilisateur=os.environ["SNS_UTILISATEUR"],
         mot_de_passe=os.environ["SNS_MOT_DE_PASSE"],
-        verifier_certificat=False,
+        verifier_certificat=os.environ.get("SNS_VERIFIER_CERTIFICAT", "1") != "0",
     )
     boitier.connecter()
     try:
