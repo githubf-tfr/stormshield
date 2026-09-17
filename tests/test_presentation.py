@@ -644,6 +644,14 @@ def test_toute_autre_erreur_devient_un_arret_portant_son_texte() -> None:
     assert message == Echoue("liaison coupée")
 
 
+def test_une_exception_sans_texte_garde_au_moins_son_type() -> None:
+    """Une exception au `str` vide — `RuntimeError()`, une erreur du SDK sans message —
+    donnait une ligne de journal vide et une boîte « Arrêt » vide, ce que la fenêtre
+    s'interdit. `lignes_de_l_incident` préfixe déjà le type ; ce chemin le perdait."""
+    assert message_de_fil(RuntimeError()) == Echoue("RuntimeError")
+    assert message_de_fil(ErreurReseau("")) == Echoue("ErreurReseau")
+
+
 # --- rendu du fichier, du plan et du rapport ------------------------------
 
 

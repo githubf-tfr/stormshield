@@ -257,7 +257,10 @@ def message_de_fil(erreur: BaseException) -> MessageFil:
                 f"{erreur} Un annuaire est apparu entre-temps : il n'y a plus rien à créer."
             )
         case _:
-            return Echoue(str(erreur))
+            # Une exception au `str` vide donnerait une ligne de journal vide et une
+            # boîte « Arrêt » vide : le type est alors la seule chose à dire, comme le
+            # fait déjà `lignes_de_l_incident`.
+            return Echoue(str(erreur) or type(erreur).__name__)
 
 
 @dataclass(frozen=True)
