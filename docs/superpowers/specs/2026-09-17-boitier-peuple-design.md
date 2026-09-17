@@ -124,7 +124,8 @@ comptes : c'est la seule graphie dont on sache qu'elle existe chez lui. Un group
 absent sous toute casse est créé sous l'orthographe **du fichier**, la seule disponible.
 
 Risque assumé : si un boîtier porte réellement `Compta` et `compta` comme deux groupes distincts
-et vivants, l'outil les confond (voir « Points non vérifiés », point 7).
+et vivants, l'outil ne s'arrête pas — signalé, ce groupe n'est touché pour aucun compte, le lot
+continue (voir « Points non vérifiés », point 7, pour la résolution exacte).
 
 ### Lecture des adhésions existantes
 
@@ -543,11 +544,14 @@ lecture et la barre avance à chaque commande.
 **7. La sensibilité à la casse des noms de groupe côté SNS.** Non tranchée, comme celle de
 l'`uid` (point 4) : rien n'indique si `Compta` et `compta` peuvent coexister comme deux groupes
 vivants et distincts. *Si l'hypothèse est fausse* — un boîtier réel porte un tel doublon —
-`USER GROUP LIST` rend deux groupes que la clé de casefold confond. L'outil ne choisit pas au
-hasard entre les deux : une collision de clé de casefold parmi les groupes rendus par
-`USER GROUP LIST` est un **arrêt net, signalé, avant toute lecture de membres et toute
-écriture** — aucun plan n'est construit sur un inventaire ambigu. Le doublon ne peut être levé
-qu'à la main, sur le boîtier.
+`USER GROUP LIST` rend deux groupes que la clé de casefold confond. **L'outil ne s'arrête pas**
+sur ce motif : un boîtier mal rangé ne doit pas priver les deux cents autres comptes du lot. Si
+la graphie de la colonne du fichier correspond **exactement** à l'un des deux groupes, c'est
+celui-là qui est adressé — l'opérateur a écrit ce nom-là, il existe tel quel sur le boîtier.
+Sinon, la collision est signalée et ce groupe n'est touché pour aucun compte, ni ajout ni
+retrait ; il n'est pas créé non plus, puisqu'il existe déjà, sous deux graphies. Même traitement
+qu'un échec isolé : signalé, le lot continue — aucun concept nouveau n'entre dans le produit. Le
+doublon ne peut être levé qu'à la main, sur le boîtier.
 
 Les points non vérifiés de la v1 restent ouverts et inchangés.
 
