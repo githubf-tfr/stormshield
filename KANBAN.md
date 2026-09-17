@@ -113,6 +113,17 @@ groupes, ajoute des adhésions — et n'enlève jamais rien.
   (224 pour 200 comptes sur 20 groupes) contre `4 + g` (9) — voir « Pourquoi la v2
   n'enlève rien » dans la spec. Le signalement des divergences d'attributs tombe avec
   lui : il était le sous-produit du `USER SHOW` par compte.
+- Revue finale de branche : un refus se comparait à la casse près, dans la branche dont
+  tout le sujet est l'insensibilité à la casse — le sort d'une écriture dépendait de la
+  graphie que le boîtier rendait à la relecture ; un `USER CREATE` refusé emportait en
+  silence toutes les adhésions du compte, que le journal nomme désormais ; une graphie
+  rendue deux fois passait pour une ambiguïté ; les comptes et groupes ambigus
+  n'atteignaient ni la boîte de confirmation ni le bilan final, qui annonçait « 0 échec »
+  pendant qu'un compte n'avait rien reçu ; et le mélange du générateur de mots de passe
+  laissait huit mutants sur seize en vie, dont un qui ne déplaçait jamais le dernier
+  caractère.
+- **405 tests** passent (marqueur `firewall` exclu), `ruff` et `mypy` verts, aucun
+  `# type: ignore`. Cahier de recette porté à 139 cas, `README.md` aligné sur la v2.
 
 ### Arrêt d'un lot en cours (2026-09-17)
 
