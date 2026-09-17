@@ -79,7 +79,7 @@ def _appelants_du_mot_de_passe(source: str) -> dict[str, set[str]]:
     arbre = ast.parse(source)
     appelants: dict[str, set[str]] = {"wrapper": set(), "protocole": set()}
     for fonction in ast.walk(arbre):
-        if not isinstance(fonction, ast.FunctionDef):
+        if not isinstance(fonction, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
         for appel in ast.walk(fonction):
             if not isinstance(appel, ast.Call):
@@ -100,11 +100,23 @@ def test_le_mot_de_passe_n_est_atteignable_que_depuis_la_creation_d_un_compte() 
     créer — et l'opération protocolaire elle-même, `<boîtier>.definir_mot_de_passe(...)`,
     n'est appelée que depuis ce wrapper.
 
-    Ce que cette garde ne voit toujours pas : un appel par alias
-    (`f = boitier.definir_mot_de_passe; f(...)`), par `getattr`, ou toute expression dont
-    le nom n'apparaît pas littéralement en position d'appel. Le test comportemental de T4
-    reste la seule preuve que le chemin ne s'exécute jamais sur un compte existant ;
-    celui-ci ne prouve que la structure.
+    Ce qu'elle **ne garantit pas**, et qu'aucune règle statique de cette forme ne
+    garantira :
+
+    - un appel par alias (`f = boitier.definir_mot_de_passe; f(...)`), par `getattr`, ou
+      toute expression dont le nom n'apparaît pas littéralement en position d'appel ;
+    - un appel qui n'est dans aucune fonction : au niveau du module, dans le corps d'une
+      classe, ou dans un `lambda`. La règle énumère les fonctions et lit leur corps ;
+      ce qui vit ailleurs lui est invisible ;
+    - une écriture de mot de passe faite depuis un autre module que `execution.py`, le
+      seul que ce test lise — `boitier_sdk` porte l'opération, rien n'y garde ses
+      appelants ;
+    - ce que le wrapper fait de ce qu'on lui donne : la règle s'arrête au point d'appel,
+      elle ne suit aucune valeur.
+
+    Autrement dit : elle attrape les contournements distraits, pas un contournement
+    décidé. Le test comportemental de T4 reste la seule preuve que le chemin ne
+    s'exécute jamais sur un compte existant ; celui-ci ne prouve que la structure.
     """
     source = Path(stormshield_utilisateurs.__file__).with_name("execution.py").read_text(
         encoding="utf-8"
@@ -203,9 +215,43 @@ def test_la_garde_refuse_l_appel_direct_a_l_operation_protocolaire() -> None:
     assert appelants["protocole"] == {"_definir_mot_de_passe", "_ajouter_les_adhesions"}
 
 
+_MODULE_SABOTE_PAR_UNE_FONCTION_ASYNCHRONE = """
+def _definir_mot_de_passe(boitier, identifiant, secret):
+    boitier.definir_mot_de_passe(identifiant, secret)
+    return secret
+
+
+def _creer_le_compte(boitier, travail):
+    boitier.creer_utilisateur(travail.identifiant)
+    return _definir_mot_de_passe(boitier, travail.identifiant, "secret")
+
+
+def _traiter_comptes(boitier, plan):
+    for travail in plan.travaux:
+        if travail.a_creer:
+            _creer_le_compte(boitier, travail)
+        _ajouter_les_adhesions(boitier, travail)
+
+
+async def _ajouter_les_adhesions(boitier, travail):
+    boitier.definir_mot_de_passe(travail.identifiant, "sabotage")
+    for groupe in travail.adhesions:
+        boitier.ajouter_membre(groupe, travail.identifiant)
+"""
+
+
 def test_la_garde_refuse_un_second_appelant_du_wrapper() -> None:
     appelants = _appelants_du_mot_de_passe(_MODULE_SABOTE_PAR_UN_SECOND_APPELANT_DU_WRAPPER)
     assert appelants["wrapper"] == {"_creer_le_compte", "_traiter_comptes"}
+
+
+def test_la_garde_voit_aussi_les_fonctions_asynchrones() -> None:
+    """`ast.FunctionDef` ne couvre pas `async def` : le même sabotage, écrit dans une
+    coroutine, passait la garde sans être vu. Le module n'en porte aucune aujourd'hui,
+    et c'est bien pour cela qu'il fallait le dire ici : le jour où l'une entre, la garde
+    ne doit pas devenir muette en silence."""
+    appelants = _appelants_du_mot_de_passe(_MODULE_SABOTE_PAR_UNE_FONCTION_ASYNCHRONE)
+    assert appelants["protocole"] == {"_definir_mot_de_passe", "_ajouter_les_adhesions"}
 
 
 @pytest.mark.firewall
