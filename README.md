@@ -101,7 +101,10 @@ Simulation permet de relire le plan avant de se décider, mais un premier lancem
 n'est pas bloqué : avant tout lot réel, une boîte de confirmation nomme l'hôte visé, le
 nombre de comptes à créer, les groupes neufs et le nombre d'adhésions à ajouter — en signalant
 les groupes qui n'auraient qu'un seul membre, signature d'une coquille de saisie dans la
-colonne des groupes. Rien n'est encore écrit à ce moment : l'opérateur peut renoncer.
+colonne des groupes. Elle annonce aussi combien de comptes et de groupes du fichier **ne
+recevront rien** parce que le firewall en porte deux graphies que seule la casse distingue :
+l'outil ne tranche pas un doublon, et le bilan final les recompte. Rien n'est encore écrit à
+ce moment : l'opérateur peut renoncer.
 
 ## Arrêter un lot en cours
 
