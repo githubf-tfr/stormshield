@@ -30,13 +30,21 @@ Elles s'appliquent à **toutes** les tâches, sans être répétées dans chacun
 - **Aucun firewall n'est joignable.** Tout se prouve contre `BoitierMemoire`. Ce qui exige un
   boîtier porte `@pytest.mark.firewall`, exclu par `addopts`.
 - **`tkinter` est absent de la machine.** `fenetre.py` n'est **jamais importé**, même
-  transitivement, par un test. Les gardes de structure de `tests/test_presentation.py`
-  (analyse `ast` de `fenetre.py` sans l'importer) et de `tests/test_amorcage.py` le
-  vérifient : ne les contourner ni les affaiblir sous aucun prétexte.
+  transitivement, par un test. Deux gardes de structure le vérifient, par analyse `ast` et
+  sans rien importer : `tests/test_presentation.py:1461` (sur `fenetre.py` lui-même) et
+  `tests/test_amorcage.py` (sur `__main__.py`). Ne les contourner ni les affaiblir sous aucun
+  prétexte.
 - **Français dans le code** — noms, docstrings, commentaires, messages — et **apostrophes
   droites** (`'`).
 - **Avant tout commit** : `.venv/bin/ruff check . --exclude .claude` puis `.venv/bin/mypy`.
   Aucun `# type: ignore`, aucun `# noqa` de confort. `line-length = 100`.
+- **Les imports sont triés** (règle `I` de `ruff`) : tout import ajouté se range à sa place
+  alphabétique dans son bloc, sinon `ruff` échoue. Les extraits de ce plan montrent le nom à
+  importer, pas la ligne où l'écrire.
+- **Aucune tâche ne se clôt en cassant la suivante** : chaque tâche laisse
+  `.venv/bin/python -m pytest`, `ruff` et `mypy` verts. Quand une tâche rend faux un test de
+  la v1, c'est elle qui le corrige, dans le même commit — la liste exhaustive de ces tests est
+  écrite dans la tâche qui les casse, avec ce qu'ils deviennent et pourquoi.
 - **Aucune chaîne de caractères ne pilote un branchement.** Les événements, les résolutions
   d'identité et les exceptions portent des types ; les branchements se font sur la classe
   (`match` / `isinstance`), jamais sur un texte.
@@ -61,12 +69,12 @@ Elles s'appliquent à **toutes** les tâches, sans être répétées dans chacun
 | `stormshield_utilisateurs/rapprochement.py` | **créé** — clé `casefold`, index des graphies du boîtier, extraction de l'`uid` d'un DN |
 | `stormshield_utilisateurs/modele.py` | `EtatBoitier` réécrit, `Plan` réécrit, `TravailCompte`, `GroupeAmbigu` et `CompteAmbigu` ajoutés |
 | `stormshield_utilisateurs/plan.py` | `construire` réécrit, `groupes_cites` et `groupes_a_interroger` ajoutés |
-| `stormshield_utilisateurs/boitier.py` | une opération de plus au `Protocol` : `lister_membres` |
+| `stormshield_utilisateurs/boitier.py` | une opération de plus au `Protocol` : `lister_membres` (**T3**, en même temps que l'implémentation SDK — voir « Ordre et parallélisme ») ; le renvoi à `execution.lire_etat` de la ligne 44 corrigé en T5 |
 | `stormshield_utilisateurs/boitier_memoire.py` | rend des **DN**, accepte des membres non rattachables, `lister_membres` |
-| `stormshield_utilisateurs/boitier_sdk.py` | `USER GROUP SHOW`, lecture des champs `member=`, `member_2=`, … |
+| `stormshield_utilisateurs/boitier_sdk.py` | `USER GROUP SHOW`, lecture des champs `member=`, `member_2=`, … ; le renvoi à `lire_etat` de la ligne 199 corrigé en T5 |
 | `stormshield_utilisateurs/execution.py` | lecture `4 + g`, arrêt entre deux lectures, **une seule** boucle d'écriture, mot de passe structurellement inatteignable pour un compte existant, refus d'adhésion mémorisés |
-| `stormshield_utilisateurs/presentation.py` | rendu du plan par compte, orphelins comptés, membres non rattachés annoncés, ambiguïtés de casse — groupes et comptes — signalées, confirmation enrichie, « déjà présent, ignoré » purgé |
-| `stormshield_utilisateurs/fenetre.py` | **une seule docstring** à corriger (ligne 389) — aucun changement de câblage : la fenêtre ne touche le plan que par `lignes_du_plan` |
+| `stormshield_utilisateurs/presentation.py` | rendu du plan par compte, orphelins comptés, membres non rattachés annoncés, ambiguïtés de casse — groupes et comptes — signalées, confirmation enrichie, « déjà présent, ignoré » purgé, docstring de `reglage_barre` (l. 422) corrigée |
+| `stormshield_utilisateurs/fenetre.py` | **une seule docstring** à corriger (celle de `_confirmer_la_perte_des_secrets`, l. 387-391, la formule courant sur 389-390) — aucun changement de câblage : la fenêtre ne touche le plan que par `lignes_du_plan` |
 | `README.md`, `docs/recette/2026-09-16-cahier-recette-v1.md`, `KANBAN.md` | mis à jour (tâches 8 à 10) |
 
 Tests existants qui **doivent** changer, et pourquoi :
@@ -76,31 +84,45 @@ Tests existants qui **doivent** changer, et pourquoi :
 | `tests/test_plan.py` | réécrit : `EtatBoitier` et `Plan` changent de forme, et toute la décision change de contenu |
 | `tests/test_modele.py` | `test_nombre_d_operations_du_plan` : le plan ne porte plus `comptes_a_creer`/`comptes_ignores` |
 | `tests/test_boitier_memoire.py` | `boitier.membres["compta"]` contient désormais des DN, pas des identifiants |
-| `tests/test_execution_ecriture.py` | 3 familles : les assertions sur `boitier.membres` (lignes 435 et 798), les totaux de `Progression` (la lecture ne vaut plus 4 mais `4 + g`), et l'accès aux champs du plan émis par `PlanPret` |
-| `tests/test_execution_lecture.py` | `lire_etat` se scinde, `lire_comptes_et_groupes` disparaît au profit de `relire_inventaire`, le nombre d'opérations de lecture n'est plus fixe |
-| `tests/test_presentation.py` | `lignes_du_plan`, `texte_de_confirmation_du_lot` et les textes qui disent « déjà présent, ignoré » |
-| `tests/test_boitier_sdk.py` | ajouts seulement (la commande `USER GROUP SHOW` et sa lecture) |
-| `tests/test_lecture.py`, `tests/test_motdepasse.py`, `tests/test_sortie.py`, `tests/fabriques.py` | **inchangés** : la v2 ne touche ni le contrat du CSV, ni la génération des secrets, ni le CSV de sortie |
+| `tests/test_execution_ecriture.py` | 3 familles : les assertions sur `boitier.membres` (ligne 798 ; la 435 reste vraie), les totaux de `Progression` (la lecture ne vaut plus 4 mais `4 + g`, et le total croît une fois), et l'accès aux champs du plan émis par `PlanPret` |
+| `tests/test_execution_lecture.py` | **en T4** : `etat.utilisateurs`/`etat.groupes` deviennent des `IndexBoitier` ; **en T5** : `lire_etat` se scinde, `lire_comptes_et_groupes` disparaît au profit de `relire_inventaire`, le nombre d'opérations de lecture n'est plus fixe |
+| `tests/test_presentation.py` | `lignes_du_plan`, `texte_de_confirmation_du_lot`, le helper `_plan` et ses six appelants, `plan.orphelins` (l. 866) et les textes qui disent « déjà présent, ignoré » |
+| `tests/test_boitier_sdk.py` | la commande `USER GROUP SHOW` et sa lecture, plus une trace des commandes envoyées sur `_ClientFactice` (T3, étape 1) |
+| `tests/fabriques.py` | reçoit `_Interrupteur`, déplacé depuis `tests/test_execution_ecriture.py` pour être partagé avec `tests/test_execution_lecture.py` (T5) |
+| `tests/test_lecture.py`, `tests/test_motdepasse.py`, `tests/test_sortie.py` | **inchangés** : la v2 ne touche ni le contrat du CSV, ni la génération des secrets, ni le CSV de sortie |
 
 ## Ordre et parallélisme
 
 ```
-T1 rapprochement ─┐
-T2 boitier + double ─┴─> T4 modèle + décision ─> T5 lecture 4+g ─> T6 présentation ─> T7 garde
-T2 ──> T3 adaptateur SDK  (T3 indépendante de T4, T5, T6, T7)
-T5 ──> T8 README   ┐
-T6 ──> T9 recette  ├─ indépendantes entre elles
-T7 ──> T10 KANBAN  ┘
+T1 rapprochement ──┐
+T2 double (DN)  ───┴─> T4 modèle + décision ─┬─> T5 lecture 4+g ─> T7 garde ─┬─> T8 README
+        └─> T3 Protocol + adaptateur SDK ────┘                               ├─> T9 recette
+                                             └─> T6 présentation ────────────┴─> T10 KANBAN
 ```
 
 - **T1 et T2 sont indépendantes** : à dispatcher ensemble.
-- **T3 est indépendante de T4 à T7** : dès que T2 est close, elle peut tourner en parallèle de
-  toute la suite (elle ne touche que `boitier_sdk.py` et `tests/test_boitier_sdk.py`).
+- **Le `Protocol` et l'adaptateur SDK voyagent ensemble, en T3.** Ajouter `lister_membres` au
+  `Protocol` sans l'implémenter sur `BoitierSDK` fait **échouer `mypy`** — `presentation.py:805`
+  rend un `BoitierSDK` là où un `Boitier` est annoncé, et `tests/test_boitier_sdk.py:31`
+  (`_conformite_au_protocol`) le prouve une seconde fois. Or aucune tâche ne se clôt sans
+  `mypy` vert. T2 ne touche donc **que** le double : une méthode de plus sur une classe
+  concrète ne gêne aucun `Protocol`, et la suite reste verte.
+- **T3 doit être close avant T5** : c'est T5 qui appelle `boitier.lister_membres` sur un
+  paramètre annoté `Boitier`, donc qui a besoin de la méthode au `Protocol`. T3 reste
+  parallélisable avec T4, qui ne l'appelle pas.
 - **T4 doit suivre T1 et T2** : elle change `tests/test_execution_ecriture.py`, que T2 touche
   déjà ; les dispatcher ensemble provoquerait un conflit sur ce fichier.
-- **T5 puis T6 puis T7** sont en chaîne : T5 change les totaux de progression que T6 observe,
-  T7 vérifie la structure que T5 pose.
-- **T8, T9 et T10 sont indépendantes entre elles** : à dispatcher ensemble une fois T7 close.
+- **T5 et T6 n'ont aucune dépendance de données** une fois T4 close : leurs fichiers sont
+  disjoints (`execution.py` + tests d'exécution d'un côté, `presentation.py`, `fenetre.py` et
+  `tests/test_presentation.py` de l'autre), et `reglage_barre` ne dépend pas du total réel —
+  la dépendance annoncée « T5 change les totaux que T6 observe » n'existe pas. Les
+  paralléliser exige deux arbres de travail séparés : les deux tâches lancent la suite
+  **entière**, et un `execution.py` à demi réécrit la ferait échouer chez le voisin. Dans un
+  arbre unique, les enchaîner — T5 puis T6.
+- **T7 suit T5** : elle éprouve la structure de `execution.py`, et son étape 2 modifie
+  temporairement ce fichier — la dispatcher pendant T5 provoquerait un conflit.
+- **T8, T9 et T10 sont indépendantes entre elles** : à dispatcher ensemble une fois T6 **et**
+  T7 closes (T9 cite les textes de T6 et les lectures `4 + g` de T5).
 
 ---
 
@@ -192,8 +214,6 @@ de DN : deux règles à retenir et à éprouver plutôt que quatre.
 """
 
 import re
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 
 # Premier composant d'un DN, supposé de forme `uid=<valeur>`. C'est la seule hypothèse
 # structurante de la v2 (spec, « Points non vérifiés », point 1) et tout le repli tient
@@ -271,7 +291,10 @@ Attendu : ÉCHEC — `ImportError: cannot import name 'IndexBoitier'`.
 
 - [ ] **Étape 7 : écrire l'index et les résolutions**
 
-À ajouter à `stormshield_utilisateurs/rapprochement.py` :
+À ajouter à `stormshield_utilisateurs/rapprochement.py`, avec les imports que ces
+définitions réclament — `from collections.abc import Iterable, Mapping` et
+`from dataclasses import dataclass`, à poser seulement maintenant : `ruff` refuse un import
+inutilisé, et ils ne servent qu'ici.
 
 ```python
 @dataclass(frozen=True)
@@ -351,22 +374,27 @@ git commit -m "feat: clé de rapprochement unique, index des graphies du boîtie
 
 ---
 
-### Tâche 2 : le `Protocol` et le double rendent des membres
+### Tâche 2 : le double rend des membres, sous forme de DN
 
 **Fichiers :**
-- Modifier : `stormshield_utilisateurs/boitier.py:65` (après `ajouter_membre`)
-- Modifier : `stormshield_utilisateurs/boitier_memoire.py:18-36` (constructeur), `:105-109`
-  (`ajouter_membre`), et ajout de `lister_membres`
+- Modifier : `stormshield_utilisateurs/boitier_memoire.py:18-35` (constructeur), `:105-109`
+  (`ajouter_membre`), et ajout de `SUFFIXE_DN`, `dn_de` et `lister_membres`
 - Modifier : `tests/test_boitier_memoire.py:18`
-- Modifier : `tests/test_execution_ecriture.py:435` et `:798` (assertions sur
-  `boitier.membres`, dont la valeur devient un DN)
+- Modifier : `tests/test_execution_ecriture.py:798` (assertion sur `boitier.membres`, dont la
+  valeur devient un DN)
 
 **Interfaces :**
 - Consomme : rien (indépendante de T1).
-- Produit : `Boitier.lister_membres(groupe: str) -> list[str]` ;
-  `boitier_memoire.dn_de(identifiant: str) -> str` ;
+- Produit : `boitier_memoire.SUFFIXE_DN` ; `boitier_memoire.dn_de(identifiant: str) -> str` ;
+  `BoitierMemoire.lister_membres(groupe: str) -> list[str]` ;
   `BoitierMemoire(..., membres: Mapping[str, Iterable[str]] | None = None)` où les valeurs
   sont des **DN**.
+
+**Cette tâche ne touche pas `boitier.py`.** L'ajout de `lister_membres` au `Protocol` est en
+T3, avec l'implémentation de `BoitierSDK` : le faire ici laisserait `BoitierSDK` sans cette
+méthode et **`mypy` échouerait** (`presentation.py:805` et `tests/test_boitier_sdk.py:31`),
+alors qu'aucune tâche ne se clôt sans `mypy` vert. Une méthode de plus sur le double, elle, ne
+gêne aucun `Protocol` : la conformité est structurelle et ne demande pas l'égalité.
 
 Le double doit pouvoir mettre le code en défaut, sans quoi il ne prouve rien : il rend des DN
 et jamais des identifiants, et il se construit avec des comptes à casse arbitraire — **deux
@@ -404,6 +432,14 @@ def test_le_double_se_construit_avec_des_membres_deja_en_place() -> None:
     ]
 
 
+def test_le_double_porte_deux_comptes_que_seule_la_casse_distingue() -> None:
+    """Exigence de la spec (« `BoitierMemoire`, qui doit grandir ») : un double qui ne
+    peut pas mettre le code en défaut ne prouve rien. C'est ce montage-là qui rend le cas
+    « compte ambigu » éprouvable de bout en bout (T4, étape 9)."""
+    boitier = BoitierMemoire(utilisateurs=["Jean.Dupont", "jean.dupont"])
+    assert boitier.lister_utilisateurs() == ["Jean.Dupont", "jean.dupont"]
+
+
 def test_lister_les_membres_d_un_groupe_inconnu_est_refuse() -> None:
     """Le double est strict sur la graphie : la casse réelle du boîtier n'est pas
     tranchée, et un double indulgent masquerait la faute qu'on cherche."""
@@ -422,9 +458,11 @@ def test_lister_les_membres_est_au_journal_des_appels() -> None:
     assert ("lister_membres", "compta") in boitier.journal_appels
 ```
 
-Ajouter `import pytest`, `ErreurCommande` et `dn_de` aux imports du fichier de test si
-nécessaire. Corriger au passage `tests/test_boitier_memoire.py:18` :
-`assert boitier.membres["compta"] == [dn_de("dupont")]`.
+`import pytest` et `ErreurCommande` sont **déjà** dans les imports du fichier (lignes 3 et
+5) : seul `dn_de` est à ajouter, sur la ligne d'import de `BoitierMemoire`. Corriger au
+passage `tests/test_boitier_memoire.py:18` :
+`assert boitier.membres["compta"] == [dn_de("dupont")]` — le double range désormais des DN,
+le test observe le même comportement sous la forme que le boîtier réel rend.
 
 - [ ] **Étape 2 : lancer, constater l'échec**
 
@@ -448,7 +486,9 @@ def dn_de(identifiant: str) -> str:
 ```
 
 Constructeur : ajouter le paramètre `membres: Mapping[str, Iterable[str]] | None = None`
-après `groupes`, et remplacer `self.membres: dict[str, list[str]] = {}` par :
+après `groupes`, **et `Mapping` à la ligne d'import de `collections.abc`** (le module
+n'importe aujourd'hui que `Callable, Iterable`), puis remplacer
+`self.membres: dict[str, list[str]] = {}` par :
 
 ```python
         # Les valeurs sont des DN, jamais des identifiants : le double doit pouvoir
@@ -472,28 +512,24 @@ Nouvelle méthode :
         return list(self.membres.get(groupe, []))
 ```
 
-Dans `stormshield_utilisateurs/boitier.py`, après `ajouter_membre` :
-
-```python
-    def lister_membres(self, groupe: str) -> list[str]:
-        """USER GROUP SHOW group=<identité rendue par USER GROUP LIST> : les DN des
-        membres. Lecture seule, et la seule commande que la v2 ajoute au dialogue."""
-        ...
-```
+Rien d'autre : `boitier.py` n'est **pas** touché par cette tâche (voir l'encadré en tête).
 
 - [ ] **Étape 4 : lancer, constater le succès puis la casse ailleurs**
 
 Run : `.venv/bin/python -m pytest`
 Attendu : `tests/test_boitier_memoire.py` passe ; `tests/test_execution_ecriture.py` échoue
-sur deux assertions (`boitier.membres == {}` ligne 435 reste vraie,
-`boitier.membres == {"compta": ["dupont"]}` ligne 798 devient fausse).
+sur **une seule** assertion, `boitier.membres == {"compta": ["dupont"]}` (ligne 798).
+`boitier.membres == {}` (ligne 435) **reste vraie** : ce montage n'ajoute aucun membre.
 
-- [ ] **Étape 5 : corriger les assertions rendues fausses**
+- [ ] **Étape 5 : corriger l'assertion rendue fausse**
 
 `tests/test_execution_ecriture.py:798` :
-`assert boitier.membres == {"compta": [dn_de("dupont")]}` (importer `dn_de`).
-Ne rien changer d'autre : ces deux tests observent un comportement qui n'a pas bougé, seule
-la forme rendue par le double a changé.
+`assert boitier.membres == {"compta": [dn_de("dupont")]}` — ajouter `dn_de` à la ligne
+d'import de `BoitierMemoire`.
+Ne rien changer d'autre : ce test observe un comportement qui n'a pas bougé — l'arrêt demandé
+laisse le compte en cours aller jusqu'au bout, rattachements compris —, seule la forme sous
+laquelle le double range ses membres a changé. Ce n'est donc pas un affaiblissement :
+l'assertion reste aussi précise, sur la forme que le boîtier réel rend.
 
 - [ ] **Étape 6 : lancer la suite entière**
 
@@ -504,33 +540,62 @@ Attendu : SUCCÈS.
 
 ```bash
 .venv/bin/ruff check . --exclude .claude && .venv/bin/mypy
-git add stormshield_utilisateurs/boitier.py stormshield_utilisateurs/boitier_memoire.py tests/
-git commit -m "feat: lecture des membres d'un groupe, rendus sous forme de DN par le double"
+git add stormshield_utilisateurs/boitier_memoire.py tests/
+git commit -m "feat: le double range et rend ses membres de groupe sous forme de DN"
 ```
 
 ---
 
-### Tâche 3 : l'adaptateur SDK sait demander les membres
+### Tâche 3 : le `Protocol` et l'adaptateur SDK savent demander les membres
 
 **Fichiers :**
+- Modifier : `stormshield_utilisateurs/boitier.py:65` (après `ajouter_membre`)
 - Modifier : `stormshield_utilisateurs/boitier_sdk.py` (fonctions pures de commande et de
   lecture, puis `BoitierSDK.lister_membres`)
-- Modifier : `tests/test_boitier_sdk.py` (ajouts seulement)
+- Modifier : `tests/test_boitier_sdk.py` (ajouts, plus une trace des commandes envoyées sur
+  `_ClientFactice`)
 
 **Interfaces :**
-- Consomme : `Boitier.lister_membres` (T2).
-- Produit : `commande_lister_membres(groupe: str) -> str` ;
+- Consomme : `BoitierMemoire.lister_membres` (T2) — le `Protocol` n'a de sens que si ses deux
+  implémentations le satisfont, et celle du double existe déjà.
+- Produit : `Boitier.lister_membres(groupe: str) -> list[str]` (au `Protocol`) ;
+  `commande_lister_membres(groupe: str) -> str` ;
   `lire_membres(jetons: Mapping[str, Any]) -> list[str]` ;
   `BoitierSDK.lister_membres(groupe: str) -> list[str]`.
 
-Cette tâche est **indépendante de T4 à T7** et peut tourner en parallèle. L'adaptateur est
-écrit contre la documentation et n'est prouvé par rien : il reste le plus mince possible, et
-tout ce qui peut en sortir en sort — d'où deux fonctions pures testées hors SDK.
+**Le `Protocol` et l'implémentation SDK sont dans la même tâche, et c'est structurel** : dès
+que `Boitier` porte `lister_membres`, `mypy` exige la méthode sur `BoitierSDK`
+(`presentation.py:805`, `tests/test_boitier_sdk.py:31`). Les séparer laisserait une tâche
+incapable de se clore. T3 est en revanche **indépendante de T4** (qui n'appelle pas cette
+opération) et peut tourner en parallèle, dans un arbre de travail séparé ; **T5 la consomme**
+et doit donc la suivre.
+
+L'adaptateur est écrit contre la documentation et n'est prouvé par rien : il reste le plus
+mince possible, et tout ce qui peut en sortir en sort — d'où deux fonctions pures testées
+hors SDK.
 
 - [ ] **Étape 1 : écrire les tests**
 
-À ajouter à `tests/test_boitier_sdk.py` (en réutilisant `_reponse_section`, `_ClientFactice`
-et `_adaptateur` déjà présents) :
+`_ClientFactice` ne garde aujourd'hui aucune trace de ce qu'on lui envoie (`send_command`
+fait `del commande`) : sans cette trace, rien ne prouve que la commande partie est celle que
+la fonction pure a composée. Lui ajouter la trace, seule modification d'un helper existant :
+
+```python
+        self.deconnexions = 0
+        # Ce que l'adaptateur a réellement envoyé : sans cette trace, rien ne relie la
+        # commande composée par la fonction pure à celle qui part sur le fil.
+        self.commandes: list[str] = []
+
+    def send_command(self, commande: str) -> Any:
+        self.commandes.append(commande)
+        if self.panne_a_l_envoi is not None:
+```
+
+(le `del commande` disparaît, la valeur étant désormais utilisée.)
+
+Puis, à ajouter à `tests/test_boitier_sdk.py` — `_reponse_section(titre, cles)` prend une
+**liste de chaînes `"cle=valeur"`**, et `_ClientFactice` reçoit sa réponse par le mot-clé
+`reponse=`, son premier paramètre positionnel étant `panne_a_l_envoi` :
 
 ```python
 def test_la_commande_de_lecture_des_membres_cite_le_groupe() -> None:
@@ -558,8 +623,13 @@ def test_les_membres_sont_rendus_dans_l_ordre_des_indices() -> None:
     assert lire_membres(jetons) == ["uid=a,dc=l", "uid=b,dc=l", "uid=j,dc=l"]
 
 
-def test_un_groupe_sans_membre_rend_une_liste_vide() -> None:
-    """Section vide ou refus : les deux se traitent comme « aucun membre connu »."""
+def test_une_section_sans_membre_rend_une_liste_vide() -> None:
+    """Section vide ou refus : les deux se traitent comme « aucun membre connu ».
+
+    Nommée « section » et non « groupe » : `tests/test_boitier_memoire.py` porte déjà un
+    `test_un_groupe_sans_membre_rend_une_liste_vide`, et deux tests homonymes dans deux
+    fichiers rendent un rapport `-v` illisible.
+    """
     assert lire_membres({"name": "compta"}) == []
 
 
@@ -573,10 +643,12 @@ def test_un_champ_qui_ressemble_a_member_sans_l_etre_est_ignore() -> None:
 
 
 def test_l_adaptateur_lit_les_membres_d_un_groupe() -> None:
+    """Bout en bout, sans réseau : la commande composée part, et la réponse du SDK —
+    analysée par le vrai `ConfigParser` — est relue en DN."""
     client = _ClientFactice(
-        _reponse_section(
+        reponse=_reponse_section(
             "Group",
-            {"name": "compta", "member": "uid=dupont,ou=users,dc=interne,dc=local"},
+            ["name=compta", "member=uid=dupont,ou=users,dc=interne,dc=local"],
         )
     )
     assert _adaptateur(client).lister_membres("compta") == [
@@ -585,9 +657,13 @@ def test_l_adaptateur_lit_les_membres_d_un_groupe() -> None:
     assert client.commandes == ['USER GROUP SHOW group="compta"']
 ```
 
-Le dernier test s'aligne sur les helpers réellement disponibles dans le fichier : si
-`_reponse_section` prend une autre signature ou si le double expose ses commandes sous un
-autre nom, suivre l'existant plutôt que ce qui est écrit ici.
+Ce dernier test a été exécuté tel quel contre les helpers du fichier : `ConfigParser` coupe
+la ligne `member=uid=dupont,…` au **premier** `=`, la valeur reste le DN entier, et
+`_adaptateur` n'envoie aucune commande à la connexion — `client.commandes` ne porte donc que
+celle-ci.
+
+Ajouter `commande_lister_membres` et `lire_membres` à la liste d'imports de `boitier_sdk`
+en tête du fichier de test.
 
 - [ ] **Étape 2 : lancer, constater l'échec**
 
@@ -633,6 +709,19 @@ Et sur `BoitierSDK` :
 (voir T5), qui le journalise et poursuit. L'absorber dans l'adaptateur rendrait un refus réel
 indiscernable d'un groupe vide.
 
+Puis, **une fois la méthode écrite et pas avant**, ajouter l'opération au `Protocol`, dans
+`stormshield_utilisateurs/boitier.py`, après `ajouter_membre` :
+
+```python
+    def lister_membres(self, groupe: str) -> list[str]:
+        """USER GROUP SHOW group=<identité rendue par USER GROUP LIST> : les DN des
+        membres. Lecture seule, et la seule commande que la v2 ajoute au dialogue."""
+        ...
+```
+
+L'ordre compte : entre les deux gestes, `mypy` est rouge (`BoitierSDK` ne satisferait plus
+`Boitier`). Les enchaîner dans la même étape est ce qui rend la tâche closable.
+
 - [ ] **Étape 4 : lancer, constater le succès**
 
 Run : `.venv/bin/python -m pytest tests/test_boitier_sdk.py -v`
@@ -643,8 +732,8 @@ Attendu : SUCCÈS.
 ```bash
 .venv/bin/python -m pytest
 .venv/bin/ruff check . --exclude .claude && .venv/bin/mypy
-git add stormshield_utilisateurs/boitier_sdk.py tests/test_boitier_sdk.py
-git commit -m "feat: USER GROUP SHOW dans l'adaptateur SDK, membres lus en champs répétés"
+git add stormshield_utilisateurs/boitier.py stormshield_utilisateurs/boitier_sdk.py tests/test_boitier_sdk.py
+git commit -m "feat: USER GROUP SHOW au Protocol et dans l'adaptateur SDK, membres lus en champs répétés"
 ```
 
 ---
@@ -654,17 +743,19 @@ git commit -m "feat: USER GROUP SHOW dans l'adaptateur SDK, membres lus en champ
 **Fichiers :**
 - Modifier : `stormshield_utilisateurs/modele.py:54-83` (`EtatBoitier`, `Plan`, ajouts)
 - Réécrire : `stormshield_utilisateurs/plan.py` (entier)
-- Modifier : `stormshield_utilisateurs/execution.py` (`lire_etat`, `executer`,
-  `_replanifier`, `_creer_comptes` → boucle unique sur les travaux)
-- Modifier : `stormshield_utilisateurs/presentation.py:569-584` et `:591-630` (adaptation
-  mécanique au nouveau plan — le rendu définitif est en T6)
+- Modifier : `stormshield_utilisateurs/execution.py` (`lire_etat`, `lire_comptes_et_groupes`,
+  `executer`, `_Refuses`, `_replanifier`, `_creer_comptes` → boucle unique sur les travaux)
+- Modifier : `stormshield_utilisateurs/presentation.py:569-584` et `:591-630` (rendu par
+  compte et orphelins comptés, dans leur forme définitive ; T6 ajoute les lignes restantes)
 - Réécrire : `tests/test_plan.py`
 - Modifier : `tests/test_modele.py`, `tests/test_execution_ecriture.py`,
-  `tests/test_presentation.py` (adaptation aux nouveaux champs)
+  `tests/test_execution_lecture.py`, `tests/test_presentation.py` (adaptation aux nouveaux
+  champs — l'inventaire complet des tests rendus faux est à l'étape 8)
 
 **Interfaces :**
 - Consomme : `rapprochement.cle`, `IndexBoitier`, `Reconnu`, `Absent`, `Ambigu`,
-  `uid_du_dn` (T1) ; `Boitier.lister_membres` (T2, pas encore appelé ici).
+  `uid_du_dn` (T1). **Rien de T3** : aucune lecture de membres ici, donc T4 et T3 peuvent
+  tourner en parallèle.
 - Produit : `modele.EtatBoitier(domaine, plancher, comptes: IndexBoitier,
   groupes: IndexBoitier, membres_par_groupe: Mapping[str, tuple[str, ...]])` ;
   `modele.TravailCompte(utilisateur, identifiant_cible, a_creer, adhesions)` ;
@@ -871,9 +962,21 @@ def test_les_groupes_cites_se_calculent_avant_toute_connexion() -> None:
 
 def test_seuls_les_groupes_cites_et_presents_sont_interroges() -> None:
     """Un groupe qu'aucune ligne ne cite n'est pas lu ; un groupe cité mais absent n'a
-    pas de membre ; un groupe ambigu ne sera touché pour personne."""
-    index = IndexBoitier.depuis(("Compta", "jamais.cite", "Doublon", "doublon"))
+    pas de membre ; un groupe ambigu ne sera touché pour personne.
+
+    Les deux graphies du doublon sont `Doublon` et `DOUBLON` : aucune n'égale la graphie
+    du fichier, sans quoi la correspondance exacte lèverait l'ambiguïté et ce groupe
+    **serait** interrogé (cas éprouvé par le test suivant).
+    """
+    index = IndexBoitier.depuis(("Compta", "jamais.cite", "Doublon", "DOUBLON"))
     assert groupes_a_interroger(("compta", "neuf", "doublon"), index) == ("Compta",)
+
+
+def test_un_groupe_ambigu_leve_par_une_correspondance_exacte_est_interroge() -> None:
+    """La contrepartie du test précédent : `doublon` existe tel quel sur le boîtier, il
+    n'y a rien à deviner, et lire ses membres évite un ADDUSER redondant."""
+    index = IndexBoitier.depuis(("Doublon", "doublon"))
+    assert groupes_a_interroger(("doublon",), index) == ("doublon",)
 
 
 def test_une_ligne_a_colonne_vide_ne_cite_aucun_groupe() -> None:
@@ -923,6 +1026,20 @@ def test_un_dn_designant_un_compte_inconnu_du_boitier_est_compte() -> None:
         _etat(comptes=("dupont",), groupes=("compta",), membres={"compta": (_dn("martin"),)}),
     )
     assert plan.nombre_membres_non_rattaches == 1
+
+
+def test_un_membre_non_rattache_ne_supprime_aucune_adhesion_planifiee() -> None:
+    """Spec : un membre que l'outil ne sait relier à aucun compte **du boîtier** ne
+    déclenche « aucune action ». Retirer du plan l'adhésion du compte homonyme que le
+    fichier demande de créer en serait une, et la plus coûteuse : ce compte naîtrait sans
+    le groupe que le CSV lui donne, sur la foi d'un DN qu'on n'a pas su lire."""
+    plan = construire(
+        [utilisateur("dupont", "compta")],
+        _etat(groupes=("compta",), membres={"compta": (_dn("dupont"),)}),
+    )
+    assert plan.nombre_membres_non_rattaches == 1
+    assert plan.travaux[0].a_creer is True
+    assert plan.travaux[0].adhesions == ("compta",)
 
 
 def test_aucun_membre_non_rattache_sur_un_boitier_sain() -> None:
@@ -1006,7 +1123,14 @@ Attendu : ÉCHEC — `ImportError: cannot import name 'groupes_cites'`.
 - [ ] **Étape 3 : réécrire le modèle**
 
 Dans `stormshield_utilisateurs/modele.py`, remplacer `EtatBoitier` et `Plan`, ajouter
-`TravailCompte`, `GroupeAmbigu` et `CompteAmbigu` (et importer `Mapping` et `IndexBoitier`) :
+`TravailCompte`, `GroupeAmbigu` et `CompteAmbigu` (et importer `Mapping` de
+`collections.abc` ainsi que `IndexBoitier` de `rapprochement` — `modele` n'importait
+jusqu'ici que `dataclass, field` et `Enum, auto`, et `rapprochement` n'importe rien du
+paquet, donc aucun cycle).
+
+`EtatBoitier` reste `frozen=True` pour l'immuabilité, mais **cesse d'être hachable** : elle
+porte désormais une `Mapping` et un `IndexBoitier` qui en porte une. Aucun site ne la hache
+aujourd'hui ; ne pas en faire une clé de dictionnaire ni un membre d'ensemble.
 
 ```python
 @dataclass(frozen=True)
@@ -1182,9 +1306,13 @@ def _adhesions_existantes(etat: EtatBoitier) -> tuple[dict[str, frozenset[str]],
         for dn in membres:
             uid = uid_du_dn(dn)
             if uid is None or cle(uid) not in etat.comptes.cles:
+                # Aucun compte du boîtier derrière ce membre : « aucune action », dit la
+                # spec — et retenir son uid en serait une, la plus coûteuse : elle
+                # supprimerait du plan l'adhésion d'un compte homonyme à créer. Compté,
+                # rien de plus.
                 non_rattaches += 1
-            if uid is not None:
-                deja.add(cle(uid))
+                continue
+            deja.add(cle(uid))
         par_groupe[cle_groupe] = frozenset(deja)
     return par_groupe, non_rattaches
 
@@ -1299,7 +1427,8 @@ Attendu : SUCCÈS.
 
 - [ ] **Étape 6 : adapter `execution.py` à la nouvelle forme**
 
-Trois changements, sans toucher encore à la lecture des membres :
+Quatre changements, sans toucher encore à la lecture des membres. `execution.py` importe
+désormais `IndexBoitier` de `rapprochement` et `TravailCompte` de `modele`.
 
 1. `lire_etat` construit des index et un inventaire d'adhésions vide :
 
@@ -1312,11 +1441,27 @@ Trois changements, sans toucher encore à la lecture des membres :
     )
 ```
 
-2. `rapport.comptes_prevus = len(plan_courant.creations)` remplace
+2. `lire_comptes_et_groupes` rend deux `IndexBoitier` et non plus deux `frozenset` — sans quoi
+   `_replanifier` ne saurait plus reconstruire l'état, et un `frozenset` détruirait l'ordre des
+   graphies dont dépend la résolution d'une collision de casse :
+
+```python
+def lire_comptes_et_groupes(boitier: Boitier) -> tuple[IndexBoitier, IndexBoitier]:
+    return (
+        IndexBoitier.depuis(boitier.lister_utilisateurs()),
+        IndexBoitier.depuis(boitier.lister_groupes()),
+    )
+```
+
+   (cette fonction disparaît en T5 au profit de `relire_inventaire` ; elle doit rester juste
+   en attendant, et son test avec elle — voir étape 8.)
+
+3. `rapport.comptes_prevus = len(plan_courant.creations)` remplace
    `len(plan_courant.comptes_a_creer)`.
 
-3. `_creer_comptes` devient `_traiter_comptes` : **une seule boucle**, sur les travaux, et le
-   mot de passe n'est atteignable que depuis la branche de création.
+4. `_creer_comptes` devient `_traiter_comptes` : **une seule boucle**, sur les travaux, et le
+   mot de passe n'est atteignable que depuis la branche de création. Son unique site d'appel,
+   dans `_appliquer` (l. 389), suit le renommage — les arguments ne changent pas.
 
 ```python
 def _traiter_comptes(
@@ -1429,9 +1574,15 @@ def _ajouter_les_adhesions(
     adhesions: set[tuple[str, str]] = field(default_factory=set)
 ```
 
-`_replanifier` filtre les travaux au lieu des deux listes disparues :
+`_replanifier` garde sa signature v1 — `(boitier, utilisateurs, etat, rejets, refuses)`, T5 y
+ajoutera `cites` et `emettre` — reconstruit l'état avec les deux index, puis filtre les
+travaux au lieu des deux listes disparues :
 
 ```python
+    comptes, groupes = lire_comptes_et_groupes(boitier)
+    plan_reconstruit = construction_plan.construire(
+        utilisateurs, replace(etat, comptes=comptes, groupes=groupes), rejets
+    )
     return replace(
         plan_reconstruit,
         travaux=tuple(
@@ -1454,28 +1605,124 @@ def _ajouter_les_adhesions(
     )
 ```
 
-- [ ] **Étape 7 : adapter `presentation.py`, mécaniquement**
+- [ ] **Étape 7 : adapter `presentation.py`**
 
-Le rendu définitif est en T6. Ici, le strict nécessaire pour que le module compile et que ses
-tests passent :
+Les deux lignes que le nouveau plan rend nécessaires sont écrites **dans leur forme
+définitive**, pas dans une forme provisoire : leur texte est connu (spec, « `presentation.py` »)
+et un journal qui ment, même le temps d'une tâche, est un journal qu'il faudrait re-prouver.
+T6 ne les réécrira pas ; il ajoutera les lignes d'ambiguïté et celle des membres non
+rattachés, et enrichira la confirmation.
 
-- `lignes_du_plan` : `for compte in plan.comptes_a_creer` devient une boucle sur
-  `plan.travaux`, avec pour l'instant `f"{travail.identifiant_cible} : à créer{rattachement}"`
-  si `travail.a_creer`, sinon `f"{travail.identifiant_cible} : présent"` ;
-  la ligne des orphelins devient `if plan.nombre_orphelins:` avec un texte provisoire
-  (T6 le fixe).
+```python
+def _ligne_du_travail(travail: TravailCompte) -> str:
+    """Ce que l'outil va faire à ce compte : rien, ou des ajouts. Jamais « ignoré » —
+    un compte déjà présent n'est plus ignoré, et le journal dit ce qui lui arrive."""
+    adhesions = ", ".join(travail.adhesions)
+    if travail.a_creer:
+        return f"{travail.identifiant_cible} : à créer" + (
+            f", rattaché à {adhesions}" if travail.adhesions else ""
+        )
+    if travail.adhesions:
+        return f"{travail.identifiant_cible} : présent — ajouté à {adhesions}"
+    return f"{travail.identifiant_cible} : présent — rien à faire"
+
+
+def _ligne_des_orphelins(nombre: int) -> str:
+    """Un nombre, jamais une liste : sur un boîtier de 500 comptes et un fichier de 20,
+    la liste noyait le plan et les rejets — ce sur quoi l'opérateur doit se prononcer."""
+    if nombre == 1:
+        return "1 compte du boîtier ne figure pas dans le fichier : il ne sera pas touché."
+    return (
+        f"{nombre} comptes du boîtier ne figurent pas dans le fichier : "
+        "ils ne seront pas touchés."
+    )
+```
+
+- `lignes_du_plan` : les groupes à créer (inchangé), puis une ligne par travail
+  (`_ligne_du_travail`), puis `_ligne_des_orphelins(plan.nombre_orphelins)` **si le nombre
+  n'est pas nul**. Les deux lignes disparues — « déjà présent, ignoré » et « Orphelins sur le
+  boîtier : … » — ne survivent nulle part.
 - `texte_de_confirmation_du_lot` : `len(plan.comptes_a_creer)` devient
   `len(plan.creations)`.
+- Importer `TravailCompte` dans `presentation.py`.
 
-- [ ] **Étape 8 : adapter les tests existants rendus faux**
+- [ ] **Étape 8 : adapter les tests existants rendus faux — inventaire exhaustif**
 
-- `tests/test_modele.py::test_nombre_d_operations_du_plan` : construire un `Plan` avec
-  `travaux=(TravailCompte(...),)`. Ajouter un cas : **un compte déjà présent avec deux
-  adhésions vaut deux opérations, pas quatre** (ni création ni mot de passe).
-- `tests/test_presentation.py` : le helper `_plan(...)` et les tests de `lignes_du_plan` et
-  de `texte_de_confirmation_du_lot` — adaptation minimale ici, contenu définitif en T6.
-- `tests/test_execution_ecriture.py` : partout où un test lit `plan.comptes_a_creer` ou
-  `plan.comptes_ignores` sur un `PlanPret`, lire `plan.creations` / `plan.travaux`.
+Cette liste a été établie en exécutant la suite v1 contre le code de la v2 : c'est
+**exactement** ce qui tombe, rien de plus, rien de moins. Aucun de ces tests n'est supprimé
+parce qu'il gêne : chacun devient faux parce que la règle qu'il énonçait a changé, ou parce
+que la donnée qu'il lit a changé de nom — et il est réécrit sur la règle neuve, sans rien
+perdre de sa précision.
+
+| Test | Pourquoi il tombe | Ce qu'il devient |
+|---|---|---|
+| `test_plan.py` — les 13 tests | `EtatBoitier` et `Plan` changent de forme, et la décision change de contenu | fichier réécrit (étape 1) ; chaque règle v1 encore vraie y a son test, augmenté de la casse, des adhésions et des compteurs |
+| `test_modele.py::test_nombre_d_operations_du_plan` | `Plan(comptes_a_creer=…)` n'existe plus | reconstruit avec `travaux=(TravailCompte(…),)`, même arithmétique (`1 + 4 + 2`). **Ajouter** un cas : un compte déjà présent à deux adhésions vaut **deux** opérations, pas quatre — ni création, ni mot de passe. Une fabrique locale `_plan(travaux, groupes_a_creer)` évite de répéter les sept champs |
+| `test_presentation.py::test_le_plan_annonce_groupes_comptes_ignores_et_orphelins` | construit un `Plan` v1 et attend « déjà présent, ignoré » et la liste des orphelins | remplacé par `test_le_plan_dit_par_compte_ce_qui_lui_arrive` (T6, étape 1). En attendant, l'adapter au rendu de l'étape 7 : « à créer, rattaché à … », « présent — rien à faire », et la ligne comptée des orphelins. La formule v1 ne disparaît pas par confort : la spec la déclare mensongère, un compte présent recevant désormais des adhésions |
+| `test_presentation.py::test_l_accord_de_membre_suit_le_nombre_de_membres` | construit un `Plan` v1 | même test, sur un plan sans travaux : il n'éprouve que l'accord de « membre », qui ne bouge pas |
+| `test_presentation.py::test_un_plan_sans_groupe_ni_orphelin_n_annonce_ni_l_un_ni_l_autre` | idem | même test, avec un unique travail à créer sans adhésion : le rendu attendu reste `["dupont : à créer"]` |
+| `test_presentation.py::_plan` et ses 6 appelants (l. 765, 778, 788, 796, 803, 810) | le helper construit un `Plan` v1 | seul le helper change : il rend des `TravailCompte(..., a_creer=True, adhesions=())`. Les six tests de confirmation gardent leurs assertions mot pour mot — `len(plan.creations)` vaut ce que `len(plan.comptes_a_creer)` valait |
+| `test_presentation.py::test_travailler_transmet_les_rejets_a_executer` (l. 866) | lit `plan.orphelins` | `assert plans[0].plan.nombre_orphelins == 0`. Le test prouve le câblage des rejets jusqu'à `executer` ; il le prouve autant sur un compteur que sur un tuple vide |
+| `test_execution_ecriture.py::test_un_lot_reel_demande_confirmation_sur_le_plan_avant_toute_ecriture` (l. 137) | lit `vus[0].comptes_a_creer` | `[travail.identifiant_cible for travail in vus[0].creations] == ["dupont"]` |
+| `test_execution_ecriture.py::test_simulation_lit_mais_n_ecrit_pas` (l. 182 **et** 183) | lit `comptes_a_creer` **et** `plan.orphelins == ("martin",)` | `plan.creations` pour la première, `plan.nombre_orphelins == 1` pour la seconde. Le nom de l'orphelin disparaît du plan par exigence de la spec — c'est le comportement testé qui change, pas la couverture |
+| `test_execution_ecriture.py::test_reconnexion_reconstruit_le_plan_au_lieu_de_rejouer` (l. 346) | lit `comptes_ignores` | `[travail.identifiant_cible for travail in plans[-1].plan.travaux if not travail.a_creer]` : la même preuve — après reconnexion, les deux comptes sont vus comme présents |
+| `test_execution_ecriture.py::test_executer_transmet_les_rejets_a_la_construction_du_plan` (l. 367) | lit `plan.orphelins` | `plans[0].plan.nombre_orphelins == 0` |
+| `test_execution_ecriture.py::test_la_reconstruction_du_plan_apres_reconnexion_transmet_aussi_les_rejets` (l. 391) | lit `plan.orphelins` | `plans[-1].plan.nombre_orphelins == 0` |
+| `test_execution_ecriture.py::test_reprise_les_comptes_deja_crees_sont_ignores` (l. 586) | lit `comptes_ignores` | `[travail.identifiant_cible for travail in plans[0].plan.travaux if not travail.a_creer] == ["dupont"]` |
+| `test_execution_lecture.py::test_un_annuaire_est_le_cas_nominal` (l. 21-22) | `etat.utilisateurs` / `etat.groupes` ne sont plus des `frozenset` | `etat.comptes.graphies == ("martin",)` et `etat.groupes.graphies == ("rh",)` — l'index conserve l'ordre rendu, l'assertion y gagne en précision |
+| `test_execution_lecture.py::test_reprise_ne_relit_que_les_comptes_et_les_groupes` (l. 116-118) | `lire_comptes_et_groupes` rend deux index | `utilisateurs.graphies == ("martin",)`, `groupes.graphies == ("rh",)` ; l'assertion sur les deux seules opérations lues ne bouge pas (le test disparaît en T5, remplacé par celui de `relire_inventaire`) |
+
+Pour les trois tests de `lignes_du_plan` et le helper `_plan`, le rendu attendu en fin de T4
+— il n'y a rien à deviner, et T6 le remplacera par un rendu plus complet :
+
+```python
+# test_le_plan_annonce_groupes_comptes_ignores_et_orphelins, sur un plan portant
+# un travail à créer avec un groupe, un travail déjà présent sans adhésion, un groupe
+# à créer et un orphelin :
+    assert lignes_du_plan(plan) == [
+        "Groupes à créer : compta_bis (1 membre)",
+        "dupont : à créer, rattaché à compta_bis",
+        "legrand : présent — rien à faire",
+        "1 compte du boîtier ne figure pas dans le fichier : il ne sera pas touché.",
+    ]
+
+
+# test_un_plan_sans_groupe_ni_orphelin_n_annonce_ni_l_un_ni_l_autre :
+    assert lignes_du_plan(plan) == ["dupont : à créer"]
+
+
+# le helper de confirmation, sans import nouveau : les sept champs sont écrits une fois,
+# et T6 y ajoutera ses propres fabriques.
+def _plan(
+    comptes: tuple[str, ...] = ("dupont",),
+    groupes: tuple[GroupeACreer, ...] = (),
+) -> Plan:
+    return Plan(
+        travaux=tuple(
+            TravailCompte(utilisateur(identifiant), identifiant, True, ())
+            for identifiant in comptes
+        ),
+        groupes_a_creer=groupes,
+        nombre_orphelins=0,
+        nombre_membres_non_rattaches=0,
+        groupes_ambigus=(),
+        comptes_ambigus=(),
+        domaine="interne.local",
+    )
+```
+
+Un test **ne tombe pas** mais change de sens, et il faut le dire :
+
+- `test_execution_ecriture.py::test_coupure_pendant_le_rattachement_laisse_une_trace`
+  (l. 424) continue de passer, alors que le comportement s'inverse. En v1 le plan reconstruit
+  ne replanifiait pas l'adhésion d'un compte devenu « déjà présent », et le lot se terminait
+  proprement ; en v2 elle est replanifiée, la coupure se reproduit, et le lot s'achève sur un
+  arrêt réseau après deux tours sans progrès (vérifié : `rapport.interrompu is True`,
+  `motif_arret is MotifArret.RESEAU`, 4 connexions, 3 échecs `USER GROUP ADDUSER`). Sa
+  docstring devient fausse : la réécrire — « l'adhésion est replanifiée après reconnexion ;
+  si la coupure se répète, le garde-fou des tours sans progrès ferme la boucle » — et
+  **ajouter** `assert rapport.motif_arret is MotifArret.RESEAU`, sans quoi ce renversement
+  n'est prouvé nulle part.
 
 - [ ] **Étape 9 : ajouter le test comportemental du mot de passe**
 
@@ -1513,8 +1760,9 @@ def test_un_compte_ambigu_ne_recoit_rien_et_le_lot_continue() -> None:
 
 Le montage suppose que `BoitierMemoire` accepte deux graphies d'un même compte : c'est
 exactement le cas que la spec lui demande de savoir provoquer (« `BoitierMemoire`, qui doit
-grandir »). Si le double expose ses comptes sous un autre nom que `utilisateurs`, suivre
-l'existant plutôt que ce qui est écrit ici.
+grandir »), et T2 le prouve désormais par un test dédié. Le double expose bien ses comptes
+sous `utilisateurs` (`boitier_memoire.py:25`) et ses mots de passe sous `mots_de_passe` : les
+deux montages ci-dessus ont été exécutés tels quels.
 
 - [ ] **Étape 10 : lancer la suite entière**
 
@@ -1535,14 +1783,20 @@ git commit -m "feat: un travail par compte, reconnaissance insensible à la cass
 
 **Fichiers :**
 - Modifier : `stormshield_utilisateurs/execution.py:30-31` (la constante), `:70-98`
-  (`lire_etat` → `lire_socle` + `lire_adhesions` + `relire_inventaire`), `:298-363`
-  (`executer`), `:366-432` (`_appliquer`), `:514-542` (`_replanifier`)
-- Modifier : `tests/test_execution_lecture.py`
-- Modifier : `tests/test_execution_ecriture.py` (totaux de progression, idempotence, reprise)
+  (`lire_etat` et `lire_comptes_et_groupes` **supprimées**), `:298-363` (`executer`),
+  `:366-432` (`_appliquer`), `:514-542` (`_replanifier`), et ajout de `Socle`, `lire_socle`,
+  `lire_adhesions`, `relire_inventaire`
+- Modifier : `stormshield_utilisateurs/boitier.py:44` et
+  `stormshield_utilisateurs/boitier_sdk.py:199` — deux docstrings renvoient à
+  `execution.lire_etat`, qui disparaît ici ; écrire `execution.lire_socle`
+- Modifier : `tests/fabriques.py` (accueille `_Interrupteur`)
+- Modifier : `tests/test_execution_lecture.py`, `tests/test_execution_ecriture.py` (totaux de
+  progression, idempotence, reprise)
 
 **Interfaces :**
-- Consomme : `Boitier.lister_membres` (T2), `plan.groupes_cites`,
-  `plan.groupes_a_interroger`, `EtatBoitier.membres_par_groupe` (T4).
+- Consomme : `Boitier.lister_membres` (**T3** : c'est le `Protocol` qui est appelé ici, pas le
+  double), `plan.groupes_cites`, `plan.groupes_a_interroger`,
+  `EtatBoitier.membres_par_groupe` (T4).
 - Produit : `LECTURES_DE_BASE: int = 4` ; `Socle(domaine, plancher, comptes, groupes)` ;
   `lire_socle(boitier) -> Socle` ;
   `lire_adhesions(boitier, identites, *, emettre, arret_demande=jamais_arrete,
@@ -1553,11 +1807,29 @@ git commit -m "feat: un travail par compte, reconnaissance insensible à la cass
 C'est cette tâche qui rend l'outil idempotent : jusqu'ici l'inventaire des adhésions était
 vide et les `ADDUSER` repartaient à chaque exécution.
 
+**Lecture de la spec assumée** : « `NOMBRE_LECTURES = 4` cesse d'être une constante » se
+réalise ici en gardant une constante pour la **part fixe** (`LECTURES_DE_BASE`) et en
+calculant le **total** (`LECTURES_DE_BASE + g`). L'intention — le nombre de lectures n'est plus
+connu d'avance — est respectée, et nommer les quatre commandes fixes vaut mieux que semer un
+`4` littéral dans `executer`.
+
 - [ ] **Étape 1 : écrire les tests de la phase de lecture**
 
-Dans `tests/test_execution_lecture.py` (en remplaçant
-`test_reprise_ne_relit_que_les_comptes_et_les_groupes` et en adaptant
-`test_la_lecture_n_ecrit_rien`) :
+`lire_etat` disparaît, et **cinq** tests de `tests/test_execution_lecture.py` l'appellent —
+pas deux. Aucun ne perd sa preuve : `lire_socle` fait exactement ce que `lire_etat` faisait,
+moins l'inventaire des adhésions, et ces cinq tests portent sur l'annuaire, pas sur les
+membres.
+
+| Test | Ligne | Ce qu'il devient |
+|---|---|---|
+| `test_un_annuaire_est_le_cas_nominal` | 19 | `socle = lire_socle(boitier)` ; assertions sur `socle.domaine`, `socle.comptes.graphies`, `socle.groupes.graphies`, `socle.plancher` (déjà adapté en T4 pour les index, ici pour le nom de la fonction) |
+| `test_la_lecture_n_ecrit_rien` | 28 | `lire_socle(boitier)` ; le jeu des quatre opérations lues ne bouge pas |
+| `test_aucun_annuaire_demande_l_initialisation` | 40 | `lire_socle(BoitierMemoire(annuaires=[]))` — `AnnuaireAbsent` est toujours levée par le socle |
+| `test_plusieurs_annuaires_arretent_tout` | 47 | `lire_socle(boitier)` — `AnnuairesMultiples` inchangée, y compris la garde « aucun `lister_utilisateurs` » |
+| `test_initialisation_puis_activation_puis_relecture_de_confirmation` | 64 | `lire_socle(boitier).domaine == "neuf.local"` |
+| `test_reprise_ne_relit_que_les_comptes_et_les_groupes` | 113 | **remplacé** par `test_la_relecture_apres_reconnexion_reconstruit_tout_l_inventaire` ci-dessous : la fonction qu'il éprouvait n'existe plus, et la relecture qui la remplace relit davantage — la preuve est plus forte, pas plus faible |
+
+Puis ajouter les tests de la phase de lecture neuve :
 
 ```python
 def test_la_lecture_vaut_quatre_commandes_plus_un_par_groupe_cite_et_present() -> None:
@@ -1616,9 +1888,13 @@ def test_la_relecture_apres_reconnexion_reconstruit_tout_l_inventaire() -> None:
     assert "lister_annuaires" not in [operation for operation, _ in boitier.journal_appels]
 ```
 
-`_Interrupteur` est déjà écrit dans `tests/test_execution_ecriture.py:48-62` (callable,
+`_Interrupteur` est déjà écrit dans `tests/test_execution_ecriture.py:50-64` (callable,
 construit avec `demande=` et basculé par `demander()`) : le déplacer dans `tests/fabriques.py`
-plutôt que de le dupliquer, et l'importer des deux côtés.
+plutôt que de le dupliquer, et l'importer des deux côtés (`from fabriques import
+_Interrupteur`, comme `utilisateur` l'est déjà ailleurs). Imports à ajouter dans
+`tests/test_execution_lecture.py` : `_ArretParLOperateur`, `lire_adhesions`, `lire_socle`,
+`relire_inventaire` depuis `execution`, et `groupes_a_interroger` depuis
+`stormshield_utilisateurs.plan` ; `pytest` et `ErreurCommande` y sont déjà.
 
 - [ ] **Étape 2 : lancer, constater l'échec**
 
@@ -1626,6 +1902,15 @@ Run : `.venv/bin/python -m pytest tests/test_execution_lecture.py -v`
 Attendu : ÉCHEC — `ImportError: cannot import name 'lire_socle'`.
 
 - [ ] **Étape 3 : écrire la nouvelle phase de lecture**
+
+**Où poser ce bloc :** `Socle`, `lire_socle`, `lire_adhesions` et `relire_inventaire` ne
+peuvent **pas** prendre la place de `lire_etat` (ligne 70). Leurs annotations et leurs valeurs
+par défaut citent `Emetteur` (l. 205), `ArretDemande` (l. 214) et `jamais_arrete` (l. 217),
+définis bien plus bas : évaluées à la définition de la fonction, elles lèveraient un
+`NameError` **à l'import du module**. Les poser juste **après `jamais_arrete`**, avant
+`class _ArretParLOperateur`. Les corps, eux, peuvent citer `_verifier_arret` défini plus loin :
+un corps ne se résout qu'à l'appel. `LECTURES_DE_BASE` et `_rien`, qui ne dépendent de rien,
+restent en tête, à la place de `NOMBRE_LECTURES`.
 
 ```python
 # CONFIG LDAP LIST, CONFIG PASSWDPOLICY SHOW, USER LIST, USER GROUP LIST. La part fixe
@@ -1714,9 +1999,15 @@ def relire_inventaire(
     return comptes, groupes, membres
 ```
 
-Supprimer `lire_etat` et `lire_comptes_et_groupes`. `execution.py` importe désormais `cle` et
-`IndexBoitier` de `rapprochement`, et `Socle` s'ajoute aux dataclasses du module — ce n'est
+Supprimer `lire_etat` et `lire_comptes_et_groupes`. `execution.py` importe désormais `cle` en
+plus d'`IndexBoitier` (posé en T4), et `Socle` s'ajoute aux dataclasses du module — ce n'est
 pas un événement, il ne rejoint pas l'union `Evenement`.
+
+Corriger au passage les deux docstrings qui renvoient à la fonction supprimée :
+`boitier.py:44` (« voir `execution.lire_etat` ») et `boitier_sdk.py:199`
+(« `lire_etat` lève `AnnuaireAbsent` ») — écrire `lire_socle`, qui porte désormais cette
+garde. Une référence orpheline dans un commentaire coûte, plus tard, une lecture de code pour
+rien.
 
 - [ ] **Étape 4 : câbler `executer`**
 
@@ -1764,10 +2055,65 @@ Dans le corps de `executer`, remplacer le bloc de lecture et de total :
                 )
 ```
 
-`_appliquer` prend `cites` et le passe à `_replanifier`, qui remplace son appel à
-`lire_comptes_et_groupes` par `relire_inventaire(boitier, cites, emettre)` et reconstruit
-l'état avec `replace(etat, comptes=..., groupes=..., membres_par_groupe=...)`. `_replanifier`
-gagne donc `emettre` dans sa signature.
+`_appliquer` prend `cites` — **sixième paramètre, juste après `rejets`**, comme l'appel
+positionnel ci-dessus l'exige — et le passe à `_replanifier`, qui remplace son appel à
+`lire_comptes_et_groupes` par `relire_inventaire`. Les deux signatures en entier, pour qu'il
+n'y ait rien à deviner :
+
+```python
+def _appliquer(
+    boitier: Boitier,
+    utilisateurs: Sequence[Utilisateur],
+    etat: EtatBoitier,
+    plan_courant: Plan,
+    rejets: Sequence[Rejet],
+    cites: Sequence[str],
+    politique: PolitiqueMotDePasse,
+    rapport: Rapport,
+    compteur: _Compteur,
+    emettre: Emetteur,
+    patience: Patience,
+    generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str],
+    arret_demande: ArretDemande,
+) -> None:
+```
+
+```python
+def _replanifier(
+    boitier: Boitier,
+    utilisateurs: Sequence[Utilisateur],
+    etat: EtatBoitier,
+    rejets: Sequence[Rejet],
+    cites: Sequence[str],
+    refuses: _Refuses,
+    emettre: Emetteur,
+) -> Plan:
+    """Reprise en milieu de lot : comptes, groupes et **tout** l'inventaire des adhésions.
+
+    L'annuaire et le plancher de politique du premier état sont conservés : ni l'un ni
+    l'autre ne change pendant un lot, et les relire ferait lever `AnnuaireAbsent` sur un
+    chemin que rien ne décrit.
+    """
+    comptes, groupes, membres = relire_inventaire(boitier, cites, emettre)
+    plan_reconstruit = construction_plan.construire(
+        utilisateurs,
+        replace(etat, comptes=comptes, groupes=groupes, membres_par_groupe=membres),
+        rejets,
+    )
+    return replace(
+        plan_reconstruit,
+        travaux=…,          # filtre posé en T4, inchangé
+        groupes_a_creer=…,  # idem
+    )
+```
+
+Et son unique site d'appel, dans `_appliquer` :
+
+```python
+                reste = _replanifier(
+                    boitier, utilisateurs, etat, rejets, cites, refuses, emettre
+                )
+```
 
 - [ ] **Étape 5 : écrire les tests d'idempotence et de reprise**
 
@@ -1809,11 +2155,11 @@ def test_un_rattachement_illisible_fait_repartir_les_memes_adhesions() -> None:
 
 
 def test_une_adhesion_refusee_ne_se_rejoue_pas_apres_reconnexion() -> None:
-    """Le rapport porterait sinon deux fois le même échec.
+    """Le rapport porterait sinon deux fois le même refus.
 
-    Le compte existe déjà : la coupure survient sur sa seconde adhésion, et le plan
-    reconstruit après reconnexion replanifie `rh` mais pas `compta`, que le boîtier a
-    explicitement refusée.
+    Le compte existe déjà : `compta` est refusé par le boîtier, puis la coupure survient
+    sur `rh`. Le plan reconstruit après reconnexion replanifie `rh` — l'inventaire relu
+    dit que l'adhésion manque — mais pas `compta`, que le boîtier a explicitement refusé.
     """
     boitier = BoitierMemoire(utilisateurs=["legrand"], groupes=["rh"])
     coupures: list[str] = []
@@ -1829,13 +2175,25 @@ def test_une_adhesion_refusee_ne_se_rejoue_pas_apres_reconnexion() -> None:
     rapport, _ = _lancer(
         boitier, [_utilisateur("legrand", "compta", "rh")], simulation=False
     )
-    assert [echec.operation for echec in rapport.echecs].count("USER GROUP ADDUSER") == 1
+    # Une seule tentative sur compta : c'est là qu'est la preuve du non-rejeu.
+    assert boitier.journal_appels.count(("ajouter_membre", "compta/legrand")) == 1
+    refus = [echec for echec in rapport.echecs if "groupe compta inconnu" in echec.motif]
+    assert len(refus) == 1
+    assert refus[0].operation == "USER GROUP ADDUSER"
     assert boitier.membres["rh"] == [dn_de("legrand")]
 ```
 
-Le refus sur `compta` suppose que ce groupe soit bien planifié : le monter avec un groupe
-absent du boîtier et un `declencheur` qui refuse aussi sa création, ou adapter le montage aux
-helpers du fichier — l'assertion qui compte est celle sur `rapport.echecs`.
+**Ne pas écrire `count("USER GROUP ADDUSER") == 1`** : le rapport en porte **deux**, et c'est
+correct. Exécuté, ce montage donne exactement
+`[('legrand', 'USER GROUP ADDUSER', 'code 200 : groupe compta inconnu'),
+('legrand', 'USER GROUP ADDUSER', 'coupure réseau pendant le rattachement : …')]` — le refus,
+puis la trace que `_signaler_interruption` inscrit sur la coupure réseau. Ce sont deux faits
+distincts, tous deux dus à l'opérateur ; ce que la spec interdit, c'est que le **même** refus
+revienne deux fois, et c'est cela que les deux premières assertions prouvent.
+
+Le groupe `compta` est bien planifié : absent du boîtier, il est créé par `_creer_groupes`
+(le `declencheur` ne refuse que `ajouter_membre`), puis l'adhésion est tentée et refusée.
+`dn_de` est déjà importé par le fichier depuis T2.
 
 Ajouter enfin, pour l'arrêt pendant la lecture — de bout en bout, sans rien de privé :
 
@@ -1866,13 +2224,51 @@ def test_l_arret_pendant_l_inventaire_ne_construit_aucun_plan() -> None:
 
 - [ ] **Étape 6 : corriger les totaux de progression rendus faux**
 
-Quatre tests figent un total qui incluait « 4 lectures » :
-`test_progression_en_simulation_couvre_les_seules_lectures`,
-`test_progression_en_reel_couvre_lectures_et_ecritures`,
-`test_progression_atteint_le_total_quand_une_creation_echoue`,
-`test_arret_definitif_gele_la_barre_sous_son_total`. Recalculer chacun en
-`LECTURES_DE_BASE + g` puis, en lot réel, `lectures + opérations`, et **ajouter** un test du
-seul instant où le total croît :
+Quatre tests figent un total qui incluait « 4 lectures ». Vérification faite en exécutant,
+**un seul change** : dans les trois autres montages, aucun groupe cité n'existe sur le double,
+donc `g = 0` et le total ne bouge pas. Ne pas les toucher — un test recalculé sans nécessité
+est un test qu'on croit avoir relu.
+
+| Test | Ligne | Verdict |
+|---|---|---|
+| `test_progression_en_simulation_couvre_les_seules_lectures` | 591 | `g = 0`, `Progression(4, 4)` **reste vrai** |
+| `test_progression_en_reel_couvre_lectures_et_ecritures` | 597 | `g = 0`, total `4 + 4 = 8` **reste vrai** |
+| `test_arret_definitif_gele_la_barre_sous_son_total` | 635 | aucun groupe cité, `Progression(5, 8)` **reste vrai** |
+| `test_progression_atteint_le_total_quand_une_creation_echoue` | 615 | `compta` et `rh` sont cités **et** présents : `g = 2`. Le total passe de 10 à **12**, les accomplies aussi — `Progression(accomplies=12, total=12)`, commentaire à corriger en « 4 + 2 lectures + … » |
+
+Un cinquième test tombe, et il n'est pas dans cette famille :
+`test_le_total_ne_croit_jamais_apres_un_recalcul` (l. 638-652) assère
+`totaux == sorted(totaux, reverse=True)` **et** `totaux[-1] < totaux[0]`. La v2 fait croître
+le total une fois, après confirmation : la séquence devient `[4, 4, 4, 4, 4, 8, 8, 8, 6]` et
+les deux assertions tombent. Ce test n'est ni supprimé ni affaibli : **la moitié de son
+invariant survit** — après la confirmation, un recalcul ne peut que faire baisser le total —
+et c'est elle qu'il éprouve désormais, sur le même montage. Il est **renommé** (son ancien nom
+affirmerait le contraire de ce que la v2 fait) et **remplace** l'ancien, qui ne reste pas à
+côté :
+
+```python
+def test_un_recalcul_apres_reconnexion_ne_peut_que_faire_baisser_le_total() -> None:
+    """Moitié de l'invariant v1 qui survit. Le total croît une fois, à la confirmation
+    (`test_le_total_ne_croit_qu_une_fois_l_ecriture_confirmee`) ; passé cet instant, un
+    plan reconstruit ne compte plus que le reste et la barre suit à la baisse, plutôt que
+    de viser un total qu'aucune opération restante ne peut plus atteindre."""
+    boitier = BoitierMemoire()
+
+    def couper_apres_le_premier(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "legrand" and boitier.connexions == 1:
+            boitier.utilisateurs.append("legrand")  # le boîtier a exécuté avant la coupure
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_apres_le_premier
+    _, evenements = _lancer(boitier, [_utilisateur("dupont"), _utilisateur("legrand", ligne=3)])
+    totaux = [progression.total for progression in _progressions(evenements)]
+    budget = max(totaux)
+    apres_la_confirmation = totaux[totaux.index(budget) :]
+    assert apres_la_confirmation == sorted(apres_la_confirmation, reverse=True)
+    assert totaux[-1] < budget
+```
+
+Et **ajouter** le test du seul instant où le total croît :
 
 ```python
 def test_le_total_ne_croit_qu_une_fois_l_ecriture_confirmee() -> None:
@@ -1881,10 +2277,23 @@ def test_le_total_ne_croit_qu_une_fois_l_ecriture_confirmee() -> None:
     boitier = BoitierMemoire(groupes=["compta"])
     _, evenements = _lancer(boitier, [_utilisateur("dupont", "compta")], simulation=False)
     totaux = [progression.total for progression in _progressions(evenements)]
-    assert totaux[0] == 5  # 4 lectures + 1 groupe cité et présent
-    assert totaux[-1] == 8  # + USER CREATE, USER PASSWORD, USER GROUP ADDUSER
+    (plan,) = [message.plan for message in evenements if isinstance(message, PlanPret)]
+    assert totaux[0] == LECTURES_DE_BASE + 1  # le seul groupe cité existe déjà
+    assert totaux[-1] == totaux[0] + plan.nombre_operations()
     assert totaux == sorted(totaux)
 ```
+
+Les deux bornes sont exprimées en `LECTURES_DE_BASE` et en `plan.nombre_operations()`, jamais
+en nombres nus : un changement de la part fixe de la lecture doit faire bouger ce test, pas le
+laisser vert par accident. Exécuté, il donne `[5, 5, 5, 5, 5, 5, 8, 8, 8, 8]`. Importer
+`LECTURES_DE_BASE` depuis `execution`.
+
+Un dernier test à retoucher, qui passe mais pour une mauvaise raison :
+`test_simulation_lit_mais_n_ecrit_pas` (l. 172) compare le journal à un sur-ensemble
+(`operations <= {…}`) qui ne contient pas `lister_membres` ; il ne survit que parce que ce
+montage n'a aucun groupe sur le double. Ajouter `"lister_membres"` à ce jeu : la simulation
+lit désormais les adhésions, et le test doit dire ce qu'il autorise, pas ce qu'il n'a pas
+rencontré.
 
 - [ ] **Étape 7 : lancer la suite entière**
 
@@ -1895,7 +2304,7 @@ Attendu : SUCCÈS.
 
 ```bash
 .venv/bin/ruff check . --exclude .claude && .venv/bin/mypy
-git add stormshield_utilisateurs/execution.py tests
+git add stormshield_utilisateurs tests
 git commit -m "feat: lecture d'état à 4 + g commandes, adhésions relues, idempotence stricte"
 ```
 
@@ -1904,10 +2313,10 @@ git commit -m "feat: lecture d'état à 4 + g commandes, adhésions relues, idem
 ### Tâche 6 : ce que l'opérateur lit
 
 **Fichiers :**
-- Modifier : `stormshield_utilisateurs/presentation.py:471-482` (docstring),
-  `:541-554` (`avertissement_perte_de_secrets`), `:569-584` (`lignes_du_plan`),
-  `:591-630` (`texte_de_confirmation_du_lot`)
-- Modifier : `stormshield_utilisateurs/fenetre.py:389` (docstring seulement)
+- Modifier : `stormshield_utilisateurs/presentation.py:422` (docstring de `reglage_barre`),
+  `:471-482` (docstring), `:541-554` (`avertissement_perte_de_secrets`), `:569-584`
+  (`lignes_du_plan`), `:591-630` (`texte_de_confirmation_du_lot`)
+- Modifier : `stormshield_utilisateurs/fenetre.py:387-391` (docstring seulement)
 - Modifier : `tests/test_presentation.py`
 
 **Interfaces :**
@@ -1915,10 +2324,18 @@ git commit -m "feat: lecture d'état à 4 + g commandes, adhésions relues, idem
 - Produit : rien de nouveau pour les autres modules ; `lignes_du_plan` et
   `texte_de_confirmation_du_lot` changent de contenu, pas de signature.
 
+**Ce que T4 a déjà posé** : `_ligne_du_travail` et `_ligne_des_orphelins`, dans leur forme
+définitive, et l'enchaînement « groupes à créer, travaux, orphelins ». T6 ne les réécrit pas :
+il ajoute les trois lignes manquantes — membres non rattachés, groupe ambigu, compte ambigu —,
+enrichit la confirmation et purge « déjà présent, ignoré ». Les trois tests de `lignes_du_plan`
+adaptés en T4 sont ici **remplacés** par les tests ci-dessous, qui couvrent le rendu complet.
+
 - [ ] **Étape 1 : écrire les tests d'affichage**
 
 Dans `tests/test_presentation.py`, remplacer les trois tests de `lignes_du_plan` et
-compléter ceux de la confirmation :
+compléter ceux de la confirmation. `from dataclasses import replace` n'est **pas** dans les
+imports du fichier : l'ajouter, ainsi que `GroupeAmbigu` et `CompteAmbigu` (`TravailCompte`
+l'a été en T4).
 
 ```python
 def test_le_plan_dit_par_compte_ce_qui_lui_arrive() -> None:
@@ -1967,7 +2384,13 @@ def test_les_membres_non_rattaches_ont_leur_ligne_quand_ils_existent() -> None:
 
 
 def test_aucun_membre_non_rattache_n_annonce_rien() -> None:
-    assert lignes_du_plan(_plan_vide()) == []
+    """Zéro sur un boîtier sain : la ligne du canari ne doit pas s'afficher pour rien,
+    sans quoi elle perdrait tout pouvoir d'alerte. Le plan porte ici des orphelins, pour
+    que ce test échoue si la ligne des non-rattachés s'ajoutait à un rendu non vide —
+    ce qu'un plan entièrement vide ne prouverait pas."""
+    assert lignes_du_plan(replace(_plan_vide(), nombre_orphelins=3)) == [
+        "3 comptes du boîtier ne figurent pas dans le fichier : ils ne seront pas touchés."
+    ]
 
 
 def test_une_collision_de_casse_est_dite_en_clair() -> None:
@@ -2023,7 +2446,8 @@ def test_l_avertissement_de_perte_ne_parle_plus_de_compte_ignore() -> None:
 ```
 
 Les deux fabriques locales à ajouter au fichier de test, pour ne pas répéter la construction
-d'un `Plan` à sept champs :
+d'un `Plan` à sept champs. Le helper `_plan(comptes, groupes)` adapté en T4 **reste** : les
+six tests de confirmation de la v1 s'appuient dessus et n'ont pas à changer une deuxième fois.
 
 ```python
 def _plan_vide() -> Plan:
@@ -2064,31 +2488,10 @@ Attendu : ÉCHEC sur les textes attendus.
 
 - [ ] **Étape 3 : écrire le rendu**
 
+`_ligne_du_travail` et `_ligne_des_orphelins` existent depuis T4, dans leur forme définitive :
+ne pas y toucher. Les trois lignes qui manquent :
+
 ```python
-def _ligne_du_travail(travail: TravailCompte) -> str:
-    """Ce que l'outil va faire à ce compte : rien, ou des ajouts. Jamais « ignoré » —
-    un compte déjà présent n'est plus ignoré, et le journal dit ce qui lui arrive."""
-    adhesions = ", ".join(travail.adhesions)
-    if travail.a_creer:
-        return f"{travail.identifiant_cible} : à créer" + (
-            f", rattaché à {adhesions}" if travail.adhesions else ""
-        )
-    if travail.adhesions:
-        return f"{travail.identifiant_cible} : présent — ajouté à {adhesions}"
-    return f"{travail.identifiant_cible} : présent — rien à faire"
-
-
-def _ligne_des_orphelins(nombre: int) -> str:
-    """Un nombre, jamais une liste : sur un boîtier de 500 comptes et un fichier de 20,
-    la liste noyait le plan et les rejets — ce sur quoi l'opérateur doit se prononcer."""
-    if nombre == 1:
-        return "1 compte du boîtier ne figure pas dans le fichier : il ne sera pas touché."
-    return (
-        f"{nombre} comptes du boîtier ne figurent pas dans le fichier : "
-        "ils ne seront pas touchés."
-    )
-
-
 def _ligne_des_non_rattaches(nombre: int) -> str:
     """Le canari de l'hypothèse sur la forme du DN. N'arrête rien, ne refuse rien, ne
     retire aucune écriture : il informe, il n'intervient pas."""
@@ -2127,7 +2530,16 @@ def _ligne_du_compte_ambigu(ambigu: CompteAmbigu) -> str:
 groupe ambigu, une ligne par compte ambigu, la ligne des orphelins si le nombre n'est pas nul,
 celle des membres non rattachés si le nombre n'est pas nul.
 
-`texte_de_confirmation_du_lot` : `len(plan.creations)` pour les comptes, une partie de plus
+**Arbitrage écrit, à ne pas re-trancher** : la spec (« puis le nombre d'orphelins en une
+ligne, puis, s'il n'est pas nul, le nombre de membres non rattachés ») peut se lire comme
+n'exigeant la condition que sur le second compteur. Les deux la portent ici, pour deux
+raisons : « 0 compte du boîtier ne figure pas dans le fichier » sur un boîtier vierge est du
+bruit au-dessus de ce sur quoi l'opérateur doit se prononcer, et la v1 n'affichait déjà rien
+dans ce cas. Le plan ne perd aucune information : un journal sans cette ligne dit zéro.
+
+`texte_de_confirmation_du_lot` : `len(plan.creations)` pour les comptes (posé en T4), une
+partie de plus **juste après celle des comptes et des groupes neufs**, dans la liste
+`parties` :
 `f"{_accord(plan.nombre_adhesions, 'adhésion à ajouter', 'adhésions à ajouter')}."`, et le
 dernier paragraphe devient :
 
@@ -2141,14 +2553,21 @@ dernier paragraphe devient :
 
 - [ ] **Étape 4 : purger « déjà présent, ignoré »**
 
-Trois textes visibles et deux docstrings mentent désormais :
+Trois textes visibles et trois docstrings mentent désormais :
 
-- `presentation.py:552` (`avertissement_perte_de_secrets`) : remplacer
-  « ils seront classés « déjà présent, ignoré » » par « ils seront vus comme déjà présents et
-  ne recevront plus que leurs adhésions manquantes ».
+- `presentation.py:553` (`avertissement_perte_de_secrets`, texte rendu à l'opérateur —
+  la ligne 552 porte « …ne leur redonnera de mot de passe, », la formule est sur la
+  suivante) : remplacer « ils seront classés « déjà présent, ignoré » » par « ils seront vus
+  comme déjà présents et ne recevront plus que leurs adhésions manquantes ».
 - `presentation.py:480` et `:545` (docstrings) : même correction de vocabulaire.
-- `fenetre.py:389` (docstring de `_confirmer_la_perte_des_secrets`) : idem. **Aucune autre
-  ligne de `fenetre.py` ne change** — la fenêtre ne touche le plan que par `lignes_du_plan`.
+- `presentation.py:422` (docstring de `reglage_barre`) : « Le total ne croît jamais : un plan
+  reconstruit après reconnexion ne peut que le réduire » devient faux depuis T5. Écrire que le
+  total croît **une seule fois**, à la confirmation de l'écriture, et qu'un recalcul après
+  reconnexion ne peut ensuite que le réduire. La fonction elle-même ne change pas : elle
+  n'a jamais lu que la progression qu'on lui donne.
+- `fenetre.py:389-390` (docstring de `_confirmer_la_perte_des_secrets`, la formule court sur
+  deux lignes) : idem. **Aucune autre ligne de `fenetre.py` ne change** — vérifié : la fenêtre
+  ne touche le plan que par `lignes_du_plan` (l. 526-527).
 - `execution.py::_arreter_par_l_operateur` : « seront vus comme déjà présents » reste vrai,
   ne pas y toucher.
 
@@ -2225,10 +2644,14 @@ git commit -m "test: garde de structure — le mot de passe n'est atteignable qu
 
 ### Tâche 8 : `README.md`
 
-**Fichiers :** Modifier `README.md` (sections « Ce que l'outil fait, et ce qu'il ne fait
-pas » et « Simulation »).
+**Fichiers :** Modifier `README.md` (sections « État », « Ce que l'outil fait, et ce qu'il ne
+fait pas », « Simulation », « Arrêter un lot en cours » et « Mots de passe »).
 
 Indépendante de T9 et T10.
+
+`grep -n "ignoré" README.md` doit rendre **zéro ligne** à la fin de cette tâche : la formule
+vit aux lignes 73, 88 (« comptes ignorés »), 107 et 120 — les deux dernières hors des sections
+que le plan visait, d'où l'étape 4.
 
 - [ ] **Étape 1 : réécrire le paragraphe de rapprochement**
 
@@ -2264,7 +2687,25 @@ Sous « Ce que l'outil fait », une phrase qui dit à l'opérateur quoi faire de
 > firewall absorbera ou refusera. Signalez ce nombre — c'est le seul signal qui dise que la
 > forme des membres rendus par le firewall n'est pas celle que l'outil attend.
 
-- [ ] **Étape 4 : commit**
+- [ ] **Étape 4 : les deux occurrences hors périmètre, et la section « État »**
+
+Trois phrases restent fausses en dehors des sections ci-dessus :
+
+- **l. 106-107**, « Arrêter un lot en cours » : « Relancer le même CSV est sans danger : les
+  comptes créés seront classés « déjà présent, ignoré ». » → « …seront vus comme déjà
+  présents : ils ne seront ni modifiés ni recréés, et ne recevront que les adhésions de
+  groupe que le CSV leur donne et que le firewall n'a pas. »
+- **l. 118-120**, « Mots de passe » : « le compte existe sur le boîtier, il n'a pas de mot de
+  passe utilisable, et aucun relancement ne le réparera — il sera classé « déjà présent,
+  ignoré ». » → remplacer la fin par « — il sera vu comme déjà présent, et son mot de passe
+  ne sera jamais retouché. » C'est le point le plus important à ne pas affaiblir : la v2
+  écrit sur des comptes existants, et cette phrase est ce qui dit à l'opérateur que le mot de
+  passe, lui, reste hors d'atteinte.
+- **l. 11**, « État » : « La v1 couvre l'injection d'utilisateurs… » — ajouter une phrase
+  disant que la v2 y ajoute la reconnaissance des comptes et groupes déjà présents, quelle
+  que soit leur casse, et l'ajout des adhésions manquantes.
+
+- [ ] **Étape 5 : commit**
 
 ```bash
 git add README.md && git commit -m "docs: README aligné sur le rapprochement de la v2"
@@ -2277,19 +2718,21 @@ git add README.md && git commit -m "docs: README aligné sur le rapprochement de
 **Fichiers :** Modifier `docs/recette/2026-09-16-cahier-recette-v1.md`.
 
 **Tranché : on étend le cahier existant, on n'en ouvre pas un second.** Motif : la v2 ne
-s'ajoute pas à la v1, elle **rend faux** neuf cas déjà numérotés (23, 26, 27, 35, 50, 51, 52,
-56, 119). Un cahier v2 séparé laisserait un cahier v1 mensonger à côté de lui, et un humain
-en recette jouerait les deux. Le fichier n'est pas renommé — la numérotation et les tables de
+s'ajoute pas à la v1, elle **rend faux douze** cas déjà numérotés (23, 26, 27, 35, 50, 51, 52,
+56, 70, 83, 118, 119). Un cahier v2 séparé laisserait un cahier v1 mensonger à côté de lui, et
+un humain en recette jouerait les deux. Le fichier n'est pas renommé — la numérotation et les tables de
 traçabilité y renvoient — mais son titre devient
 `# Cahier de recette — injection d'utilisateurs LDAP (v1 et v2)`, avec une ligne de chapeau
 disant que les cas marqués *(v2)* remplacent l'attendu d'origine.
 
 Indépendante de T8 et T10.
 
-- [ ] **Étape 1 : corriger en place les neuf cas rendus faux**
+- [ ] **Étape 1 : corriger en place les douze cas rendus faux**
 
 Chacun garde son numéro et son intitulé ; seul l'*Attendu* change, suivi de la mention
-*(v2)* :
+*(v2)*. `grep -n "déjà présent, ignoré" docs/recette/2026-09-16-cahier-recette-v1.md` doit
+rendre **zéro ligne** à la fin de l'étape — six cas portent la formule, les autres une
+promesse que la v2 contredit :
 
 | Cas | Ce qui devient faux | Nouvel attendu |
 |---|---|---|
@@ -2301,6 +2744,9 @@ Chacun garde son numéro et son intitulé ; seul l'*Attendu* change, suivi de la
 | 51 | « les 3 comptes tombent en « déjà présent, ignoré » », « la barre affiche « 4 / 4 » » | « présent — rien à faire » pour les trois, **zéro commande d'écriture**, barre `4 + g / 4 + g` |
 | 52 | « tout est « déjà présent, ignoré » » | « tout est « présent — rien à faire » » |
 | 56 | « le total vaut **4 lectures** + … » | « le total vaut **4 + g lectures** + 1 par groupe neuf + 2 par compte à créer + 1 par adhésion », et il **croît une fois**, juste après la confirmation |
+| 70 (l. 776) | la boîte d'avertissement « dit que les comptes resteront créés et seront classés « déjà présent, ignoré » » | « …resteront créés et seront vus comme déjà présents, sans que leur mot de passe soit retouché ». Le reste du cas — 3 mots de passe annoncés, bouton « Non » présélectionné — est inchangé |
+| 83 (l. 909) | « les comptes déjà créés tombent en « déjà présent, ignoré » » | « les comptes déjà créés sont vus comme présents — « présent — rien à faire », ou « présent — ajouté à … » si le CSV leur donne un groupe qu'ils n'ont pas ». Le reste — 200 comptes, chacun une fois, aucun échec « existe déjà » — est inchangé |
+| 118 (l. 1320) | « les N comptes du premier lot tombent en « **déjà présent, ignoré** » » | même correction qu'au cas 83 ; la promesse du bilan (« relancer est sans danger ») reste ce que le cas vérifie |
 | 119 | « Cette fenêtre vaut quatre commandes » | « Cette fenêtre vaut `4 + g` commandes » ; ajouter que le clic pendant la lecture des adhésions est un point d'arrêt à part entière |
 
 - [ ] **Étape 2 : écrire la section R, cas 122 à 139**
@@ -2342,14 +2788,14 @@ identique aux cas existants (`**N — Titre** · boîtier : oui`, puis *Objectif
   membres non rattachés → 122 ; `4 + g` → 131 ; arrêt entre deux lectures → 132 ;
   idempotence → 133 ; mot de passe structurel → 134 ; confirmation → 135 ; échec isolé → 136 ;
   reprise → 137 ; hypothèses SDK → 123, 124.
-- Sous « Points devenus caducs », ajouter les neuf attendus v1 corrigés à l'étape 1, avec
+- Sous « Points devenus caducs », ajouter les douze attendus v1 corrigés à l'étape 1, avec
   leur numéro et le motif en une ligne.
 
 - [ ] **Étape 4 : commit**
 
 ```bash
 git add docs/recette/2026-09-16-cahier-recette-v1.md
-git commit -m "docs: cahier de recette étendu à la v2, neuf attendus v1 corrigés"
+git commit -m "docs: cahier de recette étendu à la v2, douze attendus v1 corrigés"
 ```
 
 ---
@@ -2453,4 +2899,19 @@ git add KANBAN.md && git commit -m "docs: KANBAN — entrée v2, points à lever
    concept nouveau dans le produit : c'est le signalement non destructeur et non bloquant déjà
    en place pour les échecs isolés.
 4. **La relecture qui suit une reconnexion ne consulte pas l'arrêt demandé** : la spec fixe
-   quatre points d'arrêt et quatre seulement.
+   quatre points d'arrêt et quatre seulement. Conséquence assumée : pendant une relecture de
+   `g` commandes, le bouton *Arrêter* ne mord pas — la fenêtre est courte, et ajouter un
+   cinquième point d'arrêt serait ajouter une règle que la spec n'a pas écrite.
+5. **Un membre non rattaché ne retire jamais une adhésion planifiée.** Il est compté, et rien
+   d'autre : son `uid` n'entre pas dans l'ensemble des adhésions réputées existantes. Sans
+   cette précaution, un DN illisible désignant en réalité un compte du fichier ferait naître
+   ce compte **sans** le groupe que le CSV lui donne — une action, là où la spec en interdit
+   une. C'est `test_un_membre_non_rattache_ne_supprime_aucune_adhesion_planifiee` (T4) qui
+   verrouille ce point.
+6. **Le rapport porte deux échecs `USER GROUP ADDUSER` quand un refus précède une coupure**,
+   et c'est correct : le refus du boîtier et la trace de l'interruption sont deux faits
+   distincts. Ce que la spec interdit, c'est qu'un **même** refus reparte au tour suivant — ce
+   que prouve le compte des appels sur le groupe refusé, pas le compte des échecs.
+7. **La ligne des orphelins ne s'affiche pas quand le nombre est nul** (voir l'arbitrage écrit
+   en T6, étape 3). Un journal sans cette ligne dit zéro ; une ligne « 0 compte » au-dessus du
+   plan est du bruit.
