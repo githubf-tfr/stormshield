@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 
 from stormshield_utilisateurs import motdepasse
 from stormshield_utilisateurs.boitier import ErreurCommande, ErreurFatale, ErreurReseau
-from stormshield_utilisateurs.boitier_memoire import BoitierMemoire
+from stormshield_utilisateurs.boitier_memoire import BoitierMemoire, dn_de
 from stormshield_utilisateurs.execution import (
     CreationReussie,
     Evenement,
@@ -795,7 +795,7 @@ def test_le_compte_en_cours_va_jusqu_au_bout_et_le_suivant_n_est_pas_entame() ->
     )
     assert boitier.utilisateurs == ["dupont"]
     assert boitier.mots_de_passe == {"dupont": "MotDePasse1!"}
-    assert boitier.membres == {"compta": ["dupont"]}
+    assert boitier.membres == {"compta": [dn_de("dupont")]}
     assert rapport.interrompu is True
     assert rapport.motif_arret is MotifArret.OPERATEUR
 
