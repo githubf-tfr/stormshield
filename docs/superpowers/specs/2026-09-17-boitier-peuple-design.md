@@ -106,9 +106,24 @@ qu'il n'a pas lui-même rendue.
 Un compte **à créer** n'a pas d'orthographe côté boîtier : il est créé, puis adressé, sous
 l'identifiant du fichier — en minuscules, comme en v1.
 
-La même règle — un seul `casefold()`, un seul sens de comparaison — gouverne le rapprochement
-des noms de groupes (voir « Groupes ») : une seule fonction pour les deux rapprochements de ce
-produit, comptes et groupes, plutôt que deux règles à retenir et à tester séparément.
+**Deux graphies vivantes pour un même compte.** Si `USER LIST` rend `Jean.Dupont` **et**
+`jean.dupont`, l'outil ne sait pas auquel s'adresser, et **l'ordre dans lequel le boîtier rend sa
+liste n'est garanti par rien** : trancher sur la première graphie rendue ferait écrire sur un
+compte différent d'une exécution à l'autre. La résolution est donc celle des groupes, mot pour
+mot (voir « Groupes ») : si l'identifiant du fichier correspond **exactement** à l'une des
+graphies, c'est ce compte-là qui est adressé — l'outil a sous les yeux un compte qui s'écrit tel
+quel sur le boîtier, il n'a rien à deviner. L'identifiant du fichier étant toujours en
+minuscules, cette correspondance exacte désigne la graphie minuscule du doublon lorsqu'elle
+existe : `Jean.Dupont` et `jean.dupont` se résolvent en `jean.dupont` ; `Jean.Dupont` et
+`JEAN.DUPONT` ne se résolvent pas. Sinon le compte est **signalé comme ambigu** et rien ne lui
+est fait : ni création, ni adhésion, ni mot de passe. Même traitement qu'un échec isolé —
+signalé, le lot continue, aucun concept nouveau n'entre dans le produit. Le doublon ne se lève
+qu'à la main, sur le boîtier.
+
+La même règle — un seul `casefold()`, un seul sens de comparaison, **et la même résolution d'une
+collision de casse** — gouverne le rapprochement des noms de groupes (voir « Groupes ») : une
+seule fonction pour les deux rapprochements de ce produit, comptes et groupes, plutôt que deux
+règles à retenir et à tester séparément.
 
 ### Tableau de rapprochement
 
@@ -116,6 +131,7 @@ produit, comptes et groupes, plutôt que deux règles à retenir et à tester s�
 |---|---|
 | Compte du fichier, absent du boîtier | Créé, puis mot de passe, puis ses adhésions ajoutées |
 | Compte du fichier, présent (casse quelconque) | Conservé tel quel ; ses adhésions manquantes ajoutées |
+| Compte du fichier, présent sous deux graphies que seule la casse distingue | Correspondance exacte : ce compte-là ; sinon **signalé, rien ne lui est fait**, le lot continue |
 | Compte du boîtier, absent du fichier (orphelin) | Conservé, **jamais touché**, compté dans le rapport |
 
 Aucune suppression de compte, aucune désactivation, aucune correction d'attribut, aucun retrait
@@ -166,15 +182,18 @@ verbatim.
 ### Rattachement des membres
 
 `USER GROUP SHOW` rend ses membres sous forme de **DN**. L'outil en extrait l'`uid` — le premier
-composant, de forme `uid=<valeur>` — et le rapproche des comptes du fichier par la même clé de
-`casefold()` que partout ailleurs. Aucune adhésion n'est planifiée pour un membre ainsi
-rattaché : elle existe déjà.
+composant, de forme `uid=<valeur>` — et le rapproche des comptes **que `USER LIST` a rendus**, par
+la même clé de `casefold()` que partout ailleurs. Un membre ainsi rattaché à un compte que le
+fichier cite ne fait naître aucune adhésion pour ce groupe : elle existe déjà.
 
-Un membre que l'outil ne sait pas rattacher — sous-groupe, compte d'un autre annuaire, DN dont
-la forme n'est pas celle qu'on croit — ne déclenche **aucune action** : l'outil n'a rien à lui
-faire. Il n'est pas signalé nommément, mais il est **compté** : le plan porte le nombre de
-membres ainsi non rattachés (voir « Ce que le plan produit »), seul moyen de savoir, sans lire le
-code, si l'hypothèse sur la forme du DN tient (voir « Points non vérifiés », point 1). La seule
+Un membre que l'outil ne sait relier à **aucun compte connu du boîtier** — sous-groupe, compte
+d'un autre annuaire, DN dont la forme n'est pas celle qu'on croit — ne déclenche **aucune
+action** : l'outil n'a rien à lui faire. Il n'est pas signalé nommément, mais il est **compté** :
+le plan porte le nombre de membres ainsi non rattachés (voir « Ce que le plan produit »), seul
+moyen de savoir, sans lire le code, si l'hypothèse sur la forme du DN tient (voir « Points non
+vérifiés », point 1). Le point de comparaison est bien la liste des comptes du boîtier, jamais
+celle du fichier : un groupe peuplé contient forcément des gens légitimes qu'un CSV du jour ne
+cite pas, et les compter noierait le signal dans le bruit qu'il doit détecter. La seule
 conséquence sur l'écriture est un `ADDUSER` redondant si ce membre était en réalité un compte du
 fichier (voir « Idempotence »).
 
@@ -228,6 +247,7 @@ En plus de la v1 (comptes à créer, comptes déjà présents, groupes à créer
 | Adhésions à ajouter | pour un compte à créer comme pour un compte déjà là |
 | **Nombre** d'orphelins | un entier, pas une liste |
 | **Nombre** de membres non rattachés | un entier, pas une liste — même traitement, même raison |
+| Ambiguïtés de casse signalées | groupes et comptes que deux graphies du boîtier revendiquent : ni créés, ni touchés, le lot continue |
 
 ### Orphelins : un nombre, et plus aucune liste
 
@@ -243,8 +263,15 @@ prononcer avant d'écrire.
 ### Membres non rattachés : le canari de l'hypothèse sur le DN
 
 Le plan porte, à côté du nombre d'orphelins, le nombre de membres de groupe que le rattachement
-(voir « Rattachement des membres ») n'a su relier à aucun compte du fichier — même choix que
-pour les orphelins, et pour la même raison : un entier, jamais la liste des membres en cause.
+(voir « Rattachement des membres ») n'a su relier à **aucun compte connu du boîtier** — même
+choix que pour les orphelins, et pour la même raison : un entier, jamais la liste des membres en
+cause.
+
+**Sur un boîtier sain, ce nombre vaut zéro**, quel que soit le contenu du fichier : tout membre
+d'un groupe est un compte que `USER LIST` a rendu, et l'outil dispose de cette liste entière. Un
+membre légitime que le CSV du jour ne cite pas n'y compte donc pas — le compteur ne porte aucun
+bruit, et c'est ce qui le rend lisible. Une forme de DN inattendue, elle, le fait bondir d'un
+coup.
 
 Quand ce nombre n'est pas nul, le journal porte une ligne dédiée, lisible sans connaître le
 code :
@@ -254,12 +281,17 @@ code :
 correspondantes seront renvoyées à chaque exécution.
 ```
 
+Elle dit vrai sans réserve, et c'est la définition ci-dessus qui le permet : un membre non
+rattaché est une adhésion que l'outil ignore, et qu'il tiendra donc pour manquante à chaque
+lecture — le fichier la décrivant, elle repartira à chaque exécution.
+
 Cette ligne ne provoque ni arrêt, ni refus, ni écriture en moins : un boîtier dont les membres ne
 se rattachent pas reste parfaitement utilisable, seule l'idempotence stricte s'en trouve dégradée
 (voir « Idempotence »). C'est aussi, concrètement, le seul signal qui confirme ou infirme
 l'hypothèse sur la forme du DN rendu par `USER GROUP SHOW` (voir « Points non vérifiés », point
 1) : à zéro sur un boîtier dont les groupes cités ont des membres, elle tient ; non nul, elle est
-fausse en tout ou partie.
+fausse en tout ou partie. Aucune autre lecture n'est à faire de ce nombre — il n'y a pas de seuil
+« normal » au-dessus de zéro.
 
 ### Groupes à créer
 
@@ -272,7 +304,8 @@ d'adhésions à y ajouter.
 
 Restent hors du calcul, comme en v1 : les groupes référencés seulement par des lignes rejetées,
 et ceux référencés par un compte dont la colonne `groupes` est vide — ces deux cas ne produisent
-aucune adhésion.
+aucune adhésion. S'y ajoute, pour la même raison, le groupe qu'un compte signalé ambigu est seul
+à citer : ce compte ne reçoit aucune adhésion, ce groupe n'aurait aucun membre.
 
 Le garde-fou v1 du groupe neuf à un seul membre est conservé tel quel.
 
@@ -408,7 +441,9 @@ en lecture seule.
   casefold avec leur orthographe réelle, et les membres (DN) de chaque groupe cité par le
   fichier.
 - `Plan` porte : un travail par compte (à créer ou déjà présent, adhésions à ajouter), les
-  groupes à créer, le **nombre** d'orphelins, le **nombre** de membres non rattachés.
+  groupes à créer, le **nombre** d'orphelins, le **nombre** de membres non rattachés, et les
+  ambiguïtés de casse signalées — groupes comme comptes. Un compte signalé ambigu n'a **pas** de
+  travail : c'est ainsi que ni création, ni adhésion, ni mot de passe ne peuvent l'atteindre.
 - `Plan.nombre_operations()` compte : les groupes à créer, puis par compte la création et le mot
   de passe s'il est à créer, plus ses ajouts.
 - `comptes_a_creer` et `comptes_ignores` disparaissent au profit de ces travaux : un compte déjà
@@ -418,9 +453,10 @@ en lecture seule.
 
 ### `presentation.py`
 
-Le journal affiche, par compte, ce que l'outil va lui faire — rien, ou des ajouts —, puis le
-nombre d'orphelins en une ligne, puis, s'il n'est pas nul, le nombre de membres non rattachés
-(voir « Membres non rattachés : le canari de l'hypothèse sur le DN »).
+Le journal affiche, par compte, ce que l'outil va lui faire — rien, ou des ajouts —, une ligne
+par ambiguïté de casse signalée — groupe comme compte —, puis le nombre d'orphelins en une ligne,
+puis, s'il n'est pas nul, le nombre de membres non rattachés (voir « Membres non rattachés : le
+canari de l'hypothèse sur le DN »).
 
 ```
 12 lignes lues, 0 rejet
@@ -439,11 +475,17 @@ Tout ce qui suit tourne **sans firewall**.
 
 - un compte du boîtier orthographié `Jean.Dupont` est reconnu par une ligne `jean.dupont`, et
   toutes les opérations planifiées le visent sous `Jean.Dupont` ;
+- un compte que deux graphies du boîtier revendiquent, sans correspondance exacte, est signalé et
+  ne produit aucun travail — ni création, ni adhésion ; avec correspondance exacte, c'est cette
+  graphie-là qui est visée et rien n'est signalé ;
 - colonne `groupes` non vide : les adhésions manquantes sont planifiées ; colonne vide : aucune ;
 - une adhésion déjà portée par le boîtier n'est pas replanifiée — le cœur de l'idempotence, dans
   la seule fonction pure qui la décide ;
-- un membre dont le DN ne se rattache à aucun compte connu ne provoque ni erreur ni action, mais
-  est compté : le plan porte ce nombre, jamais la liste — même traitement que les orphelins ;
+- un membre dont le DN ne se rattache à aucun compte **du boîtier** ne provoque ni erreur ni
+  action, mais est compté : le plan porte ce nombre, jamais la liste — même traitement que les
+  orphelins ;
+- un membre qui est un compte du boîtier **absent du fichier** n'est pas compté : le compteur
+  vaut zéro sur un boîtier sain, quel que soit le contenu du fichier ;
 - la liste des groupes à interroger ne retient que ceux des lignes valides à colonne non vide :
   ni ceux d'une ligne rejetée, ni ceux qu'aucune ligne ne cite ;
 - orphelins comptés, jamais listés ;
@@ -462,8 +504,9 @@ Deux exigences en découlent, sans lesquelles le double serait complaisant :
 - **il rend des DN, jamais des identifiants** : ses membres de groupe sont stockés et rendus
   sous une forme `uid=<orthographe du boîtier>,ou=users,dc=…`. Un code qui comparerait un
   identifiant à un membre échouerait sur chaque test au lieu d'en passer quelques-uns ;
-- **il se construit avec des comptes à casse arbitraire** (`Jean.Dupont`) et des membres dont le
-  DN ne désigne aucun compte qu'il connaît.
+- **il se construit avec des comptes à casse arbitraire** (`Jean.Dupont`), avec **deux comptes
+  que seule la casse distingue** (`Jean.Dupont` et `jean.dupont`), et avec des membres dont le DN
+  ne désigne aucun compte qu'il connaît.
 
 ### `execution.py` contre le double
 
@@ -508,11 +551,13 @@ fausse* : aucun membre n'est rattaché, l'outil croit toutes les adhésions manq
 `USER GROUP ADDUSER` redondants que le boîtier absorbe ou refuse. **L'idempotence stricte est
 perdue**, et c'est le nombre de membres non rattachés (voir « Ce que le plan produit ») qui la
 rend visible sans attendre un second relancement : dès la première lecture, ce compteur dit
-combien de membres le boîtier a rendus sans que l'outil sache les relier à un compte — sans lui,
-un lot qui réémet les mêmes ajouts a toutes les apparences d'un lot qui réussit. **Aucun dommage
-n'en découle** : rien n'est retiré, rien n'est écrasé, aucun compte ne change d'état. Le repli
-tient dans une fonction isolée : l'extraction de l'`uid` depuis un DN est le seul endroit à
-corriger quand la forme réelle sera connue. **C'est ce compteur, et lui seul, qui confirme ou
+combien de membres le boîtier a rendus sans que l'outil sache les relier à un compte **de la
+liste que ce même boîtier lui a donnée** — il vaut donc zéro tant que l'hypothèse tient, et
+saute d'un coup dès qu'elle est fausse ; sans lui, un lot qui réémet les mêmes ajouts a toutes
+les apparences d'un lot qui réussit. **Aucun dommage n'en découle** : rien n'est retiré, rien
+n'est écrasé, aucun compte ne change d'état. Le repli tient dans une fonction isolée :
+l'extraction de l'`uid` depuis un DN est le seul endroit à corriger quand la forme réelle sera
+connue. **C'est ce compteur, et lui seul, qui confirme ou
 infirme cette hypothèse — c'est la première chose que le cahier de recette observera au premier
 boîtier**, avant même de juger l'idempotence sur pièce. Non tranché également : ce que rend `USER GROUP SHOW` sur un groupe sans membre — section vide ou refus ; les
 deux se traitent comme « aucun membre connu pour ce groupe ».
@@ -526,7 +571,16 @@ alors adressées par le nom du fichier, comme en v1. Rien n'est détruit.
 **3. La sensibilité à la casse de l'`uid` côté SNS.** Non tranchée : signaux contradictoires, et
 la page de l'annexe A du guide n'a pas pu être lue. **Rendue sans objet par construction** :
 l'outil n'adresse un compte existant que sous l'orthographe que `USER LIST` lui a rendue, et
-n'émet plus aucune commande citant un compte sous une autre graphie.
+n'émet plus aucune commande citant un compte sous une autre graphie. Reste le cas où `USER LIST`
+rendrait deux comptes que seule la casse distingue. *Si l'hypothèse est fausse* — un boîtier réel
+porte `Jean.Dupont` **et** `JEAN.DUPONT` —, la clé de casefold les confond et l'outil ne sait pas
+auquel écrire. **Il ne s'arrête pas** : même règle qu'au point 4 pour les groupes, et pour la
+même raison — l'ordre dans lequel le boîtier rend sa liste n'est garanti par rien, et trancher
+sur la première rendue ferait écrire sur un compte différent d'une exécution à l'autre.
+Correspondance exacte avec l'identifiant du fichier — toujours en minuscules : c'est ce compte-là.
+Sinon le compte est signalé comme ambigu, il n'est ni créé — il existe, sous deux graphies — ni
+rattaché à quoi que ce soit, et son mot de passe n'est pas touché ; le lot continue. Le doublon
+ne peut être levé qu'à la main, sur le boîtier.
 
 **4. La sensibilité à la casse des noms de groupe côté SNS.** Non tranchée, comme celle de
 l'`uid` (point 3) : rien n'indique si `Compta` et `compta` peuvent coexister comme deux groupes
@@ -538,7 +592,8 @@ deux cents autres comptes du lot. Si la graphie de la colonne du fichier corresp
 nom-là, il existe tel quel sur le boîtier. Sinon, la collision est signalée et ce groupe n'est
 touché pour aucun compte ; il n'est pas créé non plus, puisqu'il existe déjà, sous deux graphies.
 Même traitement qu'un échec isolé : signalé, le lot continue — aucun concept nouveau n'entre dans
-le produit. Le doublon ne peut être levé qu'à la main, sur le boîtier.
+le produit, et c'est mot pour mot la règle du point 3 pour les comptes : **une seule règle pour
+les deux rapprochements**. Le doublon ne peut être levé qu'à la main, sur le boîtier.
 
 Les points non vérifiés de la v1 restent ouverts et inchangés.
 
