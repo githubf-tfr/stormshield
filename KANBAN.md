@@ -91,6 +91,18 @@ _(rien)_
 
 ## Terminé
 
+### Numérotation des releases (2026-09-17)
+
+Les tags suivent les vagues de conception, pas un décompte de releases : la
+première publiée est `v2.0.0`, parce que le produit qu'elle contient est la v2 au
+sens de ce dépôt. Il n'y a jamais eu de `v1.0.0` — la v1 n'a pas été publiée, faute
+d'avoir jamais rencontré un boîtier. Un `v0.0.1-rc1` jetable a servi une fois à
+prouver que le workflow de construction du `.exe` fonctionnait, puis a été supprimé
+avec son tag.
+
+Deux numérotations concurrentes sur un même dépôt se contredisent tôt ou tard :
+celle-ci est alignée sur la documentation, qui parle partout de v1 et de v2.
+
 ### Alignement sur un boîtier déjà peuplé — v2 (2026-09-17)
 
 Spec `docs/superpowers/specs/2026-09-17-boitier-peuple-design.md`, plan
