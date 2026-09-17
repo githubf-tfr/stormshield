@@ -452,8 +452,9 @@ def test_coupure_entre_la_creation_et_le_mot_de_passe_laisse_une_trace() -> None
 
 
 def test_coupure_pendant_le_rattachement_laisse_une_trace() -> None:
-    """Le plan reconstruit ne rattrape pas un compte devenu « déjà présent » :
-    l'interruption doit laisser un échec exploitable."""
+    """L'adhésion est replanifiée après reconnexion ; si la coupure se répète, le
+    garde-fou des tours sans progrès ferme la boucle. L'interruption doit laisser un
+    échec exploitable, et le lot s'achève sur un arrêt réseau."""
     boitier = BoitierMemoire(groupes=["compta"])
 
     def couper_le_rattachement(operation: str, cible: str) -> None:
@@ -468,6 +469,10 @@ def test_coupure_pendant_le_rattachement_laisse_une_trace() -> None:
         echec.identifiant == "dupont" and echec.operation == "USER GROUP ADDUSER"
         for echec in rapport.echecs
     )
+    # Sans cette ligne, l'inversion du comportement — la v1 finissait proprement, la v2
+    # replanifie l'adhésion et bute deux fois sur la même coupure — ne serait prouvée
+    # nulle part, et le test continuerait de passer en disant le contraire.
+    assert rapport.motif_arret is MotifArret.RESEAU
 
 
 def test_la_reprise_ne_relit_que_les_comptes_et_les_groupes() -> None:
