@@ -105,7 +105,7 @@ class Echec:
 
 
 class MotifArret(Enum):
-    """Pourquoi le lot s'est arrêté. Deux conduites à tenir, donc deux valeurs.
+    """Pourquoi le lot s'est arrêté. Trois conduites à tenir, donc trois valeurs.
 
     Le journal porte le détail, mais sur un lot de deux cents comptes il fait des
     centaines de lignes : y chercher la ligne décisive n'est pas un aiguillage.
@@ -113,6 +113,7 @@ class MotifArret(Enum):
 
     RESEAU = auto()  # la liaison est tombée : relancer le lot suffit
     FATAL = auto()  # l'opérateur doit corriger quelque chose avant de relancer
+    OPERATEUR = auto()  # l'opérateur a cliqué sur Arrêter : rien à corriger, rien à attendre
 
 
 @dataclass
@@ -125,6 +126,10 @@ class Rapport:
     groupes_crees: list[str] = field(default_factory=list)
     interrompu: bool = False
     motif_arret: MotifArret | None = None
+    # Comptes que le plan prévoyait de créer, figé à sa construction. Un arrêt demandé
+    # se juge à ce qu'il laisse derrière lui : sans ce total, le bilan pourrait dire
+    # combien de comptes sont nés, jamais combien n'ont pas été touchés.
+    comptes_prevus: int = 0
 
     @property
     def sans_mot_de_passe(self) -> list[CompteCree]:

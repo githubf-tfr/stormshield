@@ -13,7 +13,7 @@ Deux modules entiers du produit n'ont **jamais été exécutés** :
   SDK réellement installé, mais **il n'a jamais parlé à un vrai boîtier**. Plusieurs de ses
   choix sont des hypothèses, listées en section F ; elles se confirment ou se démentent ici.
 
-Les tests unitaires (273, marqueur `firewall` exclu) prouvent que le code fait ce qui a été
+Les tests unitaires (296, marqueur `firewall` exclu) prouvent que le code fait ce qui a été
 écrit. Ce cahier prouve que le produit fait ce qu'on attend. Les cas déjà couverts en
 unitaire y figurent donc **volontairement**.
 
@@ -22,9 +22,9 @@ ci-dessous est formulé pour se trancher sans interprétation.
 
 ## Comment s'en servir
 
-- **Boîtier : non** — se joue sur un poste Windows seul. 21 cas.
-- **Boîtier : oui** — exige un SNS de maquette joignable. 91 cas.
-- **112 cas au total.**
+- **Boîtier : non** — se joue sur un poste Windows seul. 22 cas.
+- **Boîtier : oui** — exige un SNS de maquette joignable. 99 cas.
+- **121 cas au total.**
 
 Jouer d'abord les cas sans boîtier (sections B à D), puis les sections E et suivantes.
 Consigner le verdict de chaque cas : **OK**, **KO** ou **NJ** (non joué, avec le motif).
@@ -1248,6 +1248,118 @@ aucun groupe créé.
 
 ---
 
+# Q. Arrêt d'un lot en cours
+
+Cas ajoutés avec le bouton *Arrêter*. Numérotés à la suite, pour la même raison que la
+section P. `fenetre.py` n'ayant aucune autre couverture, ces cas sont la seule preuve que le
+bouton existe, qu'il est au bon endroit et qu'il s'active au bon moment.
+
+**113 — Au repos, *Arrêter* est grisé et *Lancer* actif** · boîtier : non
+*Objectif* : les deux boutons ne sont jamais actifs ensemble, et *Arrêter* n'a rien à arrêter
+tant qu'aucun lot n'a démarré.
+*Départ* : outil ouvert, aucun lot lancé.
+*Actions* : observer les deux boutons, puis cliquer sur *Arrêter*.
+*Attendu* : *Lancer* est **actif**, *Arrêter* est **grisé** et se trouve **à côté** de
+*Lancer*, pas à sa place. Le clic sur *Arrêter* ne produit **rien** : aucune ligne de journal,
+aucune boîte.
+*Verdict* : OK / KO —
+
+**114 — Pendant un lot, les deux états sont inversés** · boîtier : oui
+*Objectif* : l'opérateur doit lire l'état de l'outil d'un coup d'œil.
+*Départ* : `lot-200.csv`, lot réel lancé et confirmé, création de comptes en cours.
+*Actions* : observer les deux boutons pendant que le journal défile.
+*Attendu* : *Lancer* est **grisé**, *Arrêter* est **actif**. Aucun des deux libellés n'a
+changé.
+*Verdict* : OK / KO —
+
+**115 — Arrêt en lot réel : le compte en cours va à son terme** · boîtier : oui
+*Objectif* : le cœur de la fonctionnalité — le compte entamé est complet, le suivant n'est pas
+touché. Elle remplace la fermeture de la fenêtre, qui tue le fil n'importe où, y compris entre
+`USER CREATE` et `USER PASSWORD`.
+*Départ* : `lot-200.csv`, lot réel en cours de création de comptes ; garder l'ordre des
+comptes du CSV sous les yeux.
+*Actions* : cliquer une fois sur *Arrêter* ; noter le **dernier** identifiant porté par une
+ligne « … : créé » du journal, et celui qui le suit dans le CSV. Attendre le bilan, puis
+relire le boîtier (`USER LIST`, appartenances du groupe de ce compte).
+*Attendu* : **dès le clic**, le journal porte la ligne « **Arrêt demandé : le compte en cours
+va d'abord à son terme, puis le lot s'arrête.** » — l'opérateur ne reste jamais sans réponse.
+Le lot s'arrête ensuite **quelques secondes** après le clic, pas immédiatement. Le dernier
+compte annoncé créé **existe** sur le boîtier et **est membre** du groupe que le CSV lui
+donne ; le compte suivant du CSV **n'existe pas** sur le boîtier. Aucune ligne d'échec n'est
+apparue du fait de l'arrêt.
+*Verdict* : OK / KO —
+
+**116 — Le bilan d'un arrêt compte ce qui n'a pas été touché** · boîtier : oui
+*Objectif* : troisième fin possible, avec son propre bilan : l'opérateur sait déjà pourquoi le
+lot s'arrête, ce qu'il ignore c'est où il en était.
+*Départ* : cas 115 joué.
+*Actions* : lire les quatre premières lignes du bilan, et la barre de progression.
+*Attendu* : le bilan est exactement de cette forme, avec les nombres du lot joué —
+« **Arrêt demandé.** », « **N comptes créés sur 200 prévus.** », « **Les M restants n'ont
+pas été touchés.** », « **Relancez quand vous voulez : les N seront vus comme déjà
+présents.** ».
+N + M vaut le nombre de comptes à créer annoncé par le plan — pas le nombre de lignes du CSV,
+que le boîtier peut déjà porter en partie —, et N est le nombre de comptes réellement apparus
+sur le boîtier. Le bilan ne
+parle **ni** de liaison tombée, **ni** de quoi que ce soit à corriger. La barre **gèle sous
+son total** ; son total n'a pas augmenté.
+*Verdict* : OK / KO —
+
+**117 — Après l'arrêt, les boutons reprennent leur état de repos** · boîtier : oui
+*Objectif* : un arrêt ne laisse pas l'outil inutilisable, et n'arme pas non plus un second
+arrêt sans objet.
+*Départ* : cas 115 joué, bilan affiché.
+*Actions* : observer les deux boutons.
+*Attendu* : *Lancer* est **actif**, *Arrêter* est **grisé**.
+*Verdict* : OK / KO —
+
+**118 — Relancer après un arrêt ne crée rien deux fois** · boîtier : oui
+*Objectif* : la promesse du bilan — « relancer est sans danger » — doit être vraie.
+*Départ* : cas 115 joué ; relever ce que le boîtier porte réellement.
+*Actions* : relancer le **même** CSV en lot réel, confirmer, laisser aller jusqu'au bout.
+*Attendu* : les N comptes du premier lot tombent en « **déjà présent, ignoré** », les autres
+sont créés, et le boîtier finit avec **exactement** 200 comptes, chacun une fois. Aucun échec
+« existe déjà ».
+*Verdict* : OK / KO —
+
+**119 — Arrêt pendant une simulation** · boîtier : oui
+*Objectif* : l'état des deux boutons ne dépend pas du mode — un bouton qui ne réagirait que
+dans un cas sur deux serait déroutant —, et une simulation arrêtée le dit sans prétendre avoir
+créé quoi que ce soit.
+*Départ* : `lot-200.csv`, **Simulation cochée**.
+*Actions* : cliquer *Lancer*, puis *Arrêter* pendant la lecture du boîtier. Cette fenêtre vaut
+quatre commandes, soit une seconde ou deux : **noter NJ si le moment ne peut pas être visé.**
+*Attendu* : le lot s'arrête, le bilan est celui d'un **arrêt demandé** et annonce « **0 compte
+créé sur … prévus** ». Sa **quatrième ligne** est « **Relancez quand vous voulez : aucun compte
+n'a été créé, le lot repartira de zéro.** » — elle ne doit **pas** parler d'un « compte créé »
+qui serait vu comme déjà présent. Le boîtier relu est **strictement identique** à son état de
+départ.
+*Verdict* : OK / KO / NJ —
+
+**120 — Arrêt avant la confirmation d'écriture** · boîtier : oui
+*Objectif* : un lot que l'opérateur vient d'arrêter ne doit pas lui poser de question, ni rien
+envoyer.
+*Départ* : `lot-200.csv`, **Simulation décochée** ; relever la liste des comptes et des
+groupes avant.
+*Actions* : cliquer *Lancer*, puis *Arrêter* **pendant la lecture**, avant que la boîte
+« Écrire sur le firewall » n'apparaisse. **Noter NJ si le moment ne peut pas être visé.**
+*Attendu* : la boîte de confirmation **ne s'ouvre pas**. Le bilan est celui d'un arrêt demandé
+avec « 0 compte créé », et le boîtier relu est **strictement identique** à son état de
+départ.
+*Verdict* : OK / KO / NJ —
+
+**121 — Les mots de passe des comptes créés restent enregistrables** · boîtier : oui
+*Objectif* : un arrêt ne doit pas faire perdre les secrets déjà générés — ils n'existent que
+dans la mémoire du processus, et les comptes, eux, existent sur le boîtier.
+*Départ* : cas 115 joué, bilan affiché.
+*Actions* : cliquer *Enregistrer les mots de passe…*, écrire le fichier, l'ouvrir.
+*Attendu* : le bouton est **actif**, le CSV porte **une ligne par compte créé** — les N du
+bilan, et aucun autre — avec un mot de passe non vide pour chacun, **y compris pour le dernier
+compte créé avant l'arrêt**.
+*Verdict* : OK / KO —
+
+---
+
 # Récapitulatif
 
 | Section | Cas | Boîtier requis |
@@ -1270,10 +1382,12 @@ aucun groupe créé.
 | N — Certificat | 104 | non |
 | O — Volume et robustesse | 105 – 109 | **oui** |
 | P — Compléments de la revue finale | 110 – 112 | **oui** |
+| Q — Arrêt d'un lot en cours | 114 – 121 | **oui** |
+| Q — Arrêt d'un lot en cours | 113 | non |
 
-**21 cas sans boîtier** : 1 à 18, 79, 87 et 104. Ils se jouent dès qu'un poste Windows et le
-`.exe` sont disponibles, sans attendre la maquette.
-**91 cas exigeant un boîtier** : tous les autres. **112 cas au total.**
+**22 cas sans boîtier** : 1 à 18, 79, 87, 104 et 113. Ils se jouent dès qu'un poste Windows et
+le `.exe` sont disponibles, sans attendre la maquette.
+**99 cas exigeant un boîtier** : tous les autres. **121 cas au total.**
 
 ## Traçabilité
 
@@ -1317,6 +1431,13 @@ lot et son réarmement au lot suivant (R3) → cas **108**, **109** ; fermeture 
 principale pendant `CONFIG LDAP INITIALIZE` (R4) → cas **95**, **96** ; masquage du mot de
 passe dans un refus de création d'annuaire (R6) → cas **98** ; message terminal inconnu dans
 le dialogue d'annuaire → cas **102**.
+
+**Le bouton *Arrêter*** (section « Arrêter un lot en cours » de la spécification) → cas de ce
+cahier : les deux boutons et leurs trois états — avant, pendant, après → cas **113**, **114**,
+**117** ; le compte en cours mené à son terme et le suivant non entamé → cas **115** ; le
+bilan dédié et le gel de la barre → cas **116** ; le bouton en simulation → cas **119** ;
+l'arrêt avant la confirmation d'écriture → cas **120** ; relancer sans rien créer deux fois →
+cas **118** ; les mots de passe des comptes créés toujours enregistrables → cas **121**.
 
 ### Points devenus caducs
 

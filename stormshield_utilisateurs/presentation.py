@@ -22,6 +22,7 @@ from stormshield_utilisateurs.boitier import Boitier, ErreurBoitier
 from stormshield_utilisateurs.execution import (
     AnnuaireAbsent,
     AnnuaireDejaPresent,
+    ArretDemande,
     Evenement,
     Journal,
     PolitiqueRefusee,
@@ -29,6 +30,7 @@ from stormshield_utilisateurs.execution import (
     Termine,
     creer_annuaire,
     executer,
+    jamais_arrete,
 )
 from stormshield_utilisateurs.modele import (
     CompteCree,
@@ -75,6 +77,60 @@ class AnnuaireCree:
     """L'annuaire vient d'être initialisé puis activé. Ne se refait pas."""
 
     domaine: str
+
+
+class DemandeArret:
+    """L'ordre d'arrêt, posé dans le fil de l'interface et lu dans le fil d'exécution.
+
+    `threading.Event` plutôt qu'un simple booléen d'attribut : c'est la primitive de la
+    bibliothèque standard faite pour ce sens de circulation, sa pose et sa lecture sont
+    atomiques, et elle publie la bascule au fil qui lit — un attribut ordinaire ne
+    promet ni l'un ni l'autre entre deux fils.
+
+    Ne bloque personne, à la différence de `DemandeConfirmation` : l'opérateur qui clique
+    n'attend aucune réponse, et le fil d'exécution ne s'arrête pas pour lire un drapeau.
+    Se pose une fois pour toutes ; rien ne la retire, un lot arrêté est terminé.
+    """
+
+    def __init__(self) -> None:
+        self._demande = threading.Event()
+
+    def demander(self) -> None:
+        """À appeler depuis le fil de l'interface, au clic sur *Arrêter*."""
+        self._demande.set()
+
+    def __call__(self) -> bool:
+        """Lu par le fil d'exécution, entre deux comptes et entre deux groupes."""
+        return self._demande.is_set()
+
+
+ARRET_DEMANDE_AU_CLIC = (
+    "Arrêt demandé : le compte en cours va d'abord à son terme, puis le lot s'arrête."
+)
+"""Écrite au journal dès le clic, et non à l'arrêt effectif.
+
+Entre les deux il peut s'écouler une quinzaine de secondes — trois essais de mot de
+passe à deux secondes, une reconnexion — pendant lesquelles des comptes continuent de
+défiler. Sans cette ligne, rien ne distingue une demande prise en compte d'un clic
+perdu, et l'opérateur qui doute reclique ou ferme la fenêtre.
+"""
+
+
+@dataclass(frozen=True)
+class EtatDesBoutons:
+    """Ce que *Lancer* et *Arrêter* affichent, calculé hors de tout widget."""
+
+    lancer: bool
+    arreter: bool
+
+
+def etat_des_boutons(*, lot_en_cours: bool) -> EtatDesBoutons:
+    """Les deux boutons ne sont jamais actifs ensemble.
+
+    Au repos, *Arrêter* n'a rien à arrêter ; pendant un lot, *Lancer* ferait partir un
+    second lot sur le même boîtier pendant que le premier y écrit encore.
+    """
+    return EtatDesBoutons(lancer=not lot_en_cours, arreter=lot_en_cours)
 
 
 class DemandeConfirmation:
@@ -600,28 +656,69 @@ def _conduite_apres_arret(motif: MotifArret | None) -> str:
                 "ci-dessus indique — identifiants, configuration ou politique de mot "
                 "de passe — avant de relancer."
             )
+        case MotifArret.OPERATEUR:
+            # `lignes_du_rapport` ne passe pas par ici pour ce motif : un arrêt demandé
+            # a son propre bilan, qui compte les comptes non touchés. Cette phrase reste
+            # vraie pour tout autre appelant.
+            return "Arrêt demandé : les comptes non entamés le sont restés."
         case None:
             return "Le motif de l'arrêt est en clair dans le journal ci-dessus."
+
+
+def _lignes_d_un_arret_demande(rapport: Rapport) -> list[str]:
+    """Bilan d'un arrêt demandé : ce qui est né, ce qui n'a pas été touché, et que
+    relancer ne coûte rien.
+
+    Forme à part, et non une conduite à tenir de plus : l'opérateur qui vient de cliquer
+    sait déjà pourquoi le lot s'arrête. Ce qu'il ignore, c'est où le lot en était.
+    """
+    crees = len(rapport.comptes_crees)
+    restants = max(rapport.comptes_prevus - crees, 0)
+    # Trois formes, pas deux : zéro compte créé est le cas le plus fréquent d'un arrêt
+    # demandé — toute simulation, et tout clic tombé avant la première écriture.
+    match crees:
+        case 0:
+            relance = "aucun compte n'a été créé, le lot repartira de zéro"
+        case 1:
+            relance = "le compte créé sera vu comme déjà présent"
+        case _:
+            relance = f"les {crees} seront vus comme déjà présents"
+    match restants:
+        case 0:
+            reste = "Aucun compte ne restait à créer."
+        case 1:
+            reste = "Le compte restant n'a pas été touché."
+        case _:
+            reste = f"Les {restants} restants n'ont pas été touchés."
+    return [
+        "Arrêt demandé.",
+        f"{_accord(crees, 'compte créé', 'comptes créés')} sur "
+        f"{rapport.comptes_prevus} prévus.",
+        reste,
+        f"Relancez quand vous voulez : {relance}.",
+    ]
 
 
 def lignes_du_rapport(rapport: Rapport) -> list[str]:
     """Bilan final.
 
     `interrompu` distingue le lot mené à son terme de celui qui s'est arrêté, et
-    `motif_arret` dit laquelle des deux conduites à tenir s'impose.
+    `motif_arret` dit laquelle des trois conduites à tenir s'impose.
     """
     resume = (
         f"{_accord(len(rapport.comptes_crees), 'compte créé', 'comptes créés')}, "
         f"{_accord(len(rapport.groupes_crees), 'groupe créé', 'groupes créés')}, "
         f"{_accord(len(rapport.echecs), 'échec')}."
     )
-    entete = (
-        f"Lot interrompu : {resume} {_conduite_apres_arret(rapport.motif_arret)} "
-        "Ce qui est créé reste créé."
-        if rapport.interrompu
-        else f"Terminé : {resume}"
-    )
-    lignes = [entete]
+    if rapport.motif_arret is MotifArret.OPERATEUR:
+        lignes = _lignes_d_un_arret_demande(rapport)
+    else:
+        lignes = [
+            f"Lot interrompu : {resume} {_conduite_apres_arret(rapport.motif_arret)} "
+            "Ce qui est créé reste créé."
+            if rapport.interrompu
+            else f"Terminé : {resume}"
+        ]
     lignes.extend(f"{echec.identifiant} — {echec.operation} : {echec.motif}"
                   for echec in rapport.echecs)
     sans_secret = rapport.sans_mot_de_passe
@@ -720,12 +817,16 @@ def travailler(
     utilisateurs: Sequence[Utilisateur],
     publier: Publieur,
     rejets: Sequence[Rejet] = (),
+    arret: ArretDemande = jamais_arrete,
     fabriquer_boitier: Callable[[Connexion], Boitier] = boitier_de_la_connexion,
 ) -> None:
     """Corps du fil d'exécution : ne touche aucun widget, ne fait que publier.
 
     Toute exception est convertie en message : le fil n'a pas d'appelant, ce qu'il
     laisserait passer ne s'afficherait nulle part.
+
+    `arret` est le seul objet que ce fil partage avec celui de l'interface : la fenêtre
+    le pose, le métier le lit. Il ne porte aucun widget.
     """
     boitier = fabriquer_boitier(parametres.connexion)
     hote = parametres.connexion.hote
@@ -748,6 +849,7 @@ def travailler(
             # elles, un compte du boîtier dont la ligne a été rejetée serait annoncé
             # orphelin alors qu'il y figure bel et bien.
             rejets=rejets,
+            arret_demande=arret,
         )
     except Exception as erreur:
         publier(message_de_fil(erreur))

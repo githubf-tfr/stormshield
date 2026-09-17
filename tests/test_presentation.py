@@ -41,11 +41,13 @@ from stormshield_utilisateurs.modele import (
     Rejet,
 )
 from stormshield_utilisateurs.presentation import (
+    ARRET_DEMANDE_AU_CLIC,
     AnnuaireCree,
     AnnuaireManquant,
     BoiteParLot,
     ComptesEnregistrables,
     Connexion,
+    DemandeArret,
     DemandeConfirmation,
     Echoue,
     IncidentInterface,
@@ -56,6 +58,7 @@ from stormshield_utilisateurs.presentation import (
     Publieur,
     avertissement_de_fermeture,
     avertissement_perte_de_secrets,
+    etat_des_boutons,
     libelle_plancher,
     ligne_d_enregistrement,
     ligne_de_message_inconnu,
@@ -898,6 +901,146 @@ def test_un_arret_fatal_dit_de_corriger_avant_de_relancer() -> None:
 
 def test_un_lot_mene_a_son_terme_ne_parle_d_aucun_arret() -> None:
     assert lignes_du_rapport(Rapport())[0].startswith("Terminé")
+
+
+# --- arrêt demandé par l'opérateur ----------------------------------------
+
+
+def test_le_bilan_d_un_arret_demande_compte_les_crees_et_les_non_touches() -> None:
+    """Troisième fin possible, avec son propre bilan : l'opérateur doit lire d'un coup
+    ce qui est né, ce qui n'a pas été touché, et que relancer ne coûte rien."""
+    rapport = Rapport(
+        comptes_crees=[CompteCree(f"compte{rang}", "s3cr3t") for rang in range(37)],
+        interrompu=True,
+        motif_arret=MotifArret.OPERATEUR,
+        comptes_prevus=200,
+    )
+    assert lignes_du_rapport(rapport)[:4] == [
+        "Arrêt demandé.",
+        "37 comptes créés sur 200 prévus.",
+        "Les 163 restants n'ont pas été touchés.",
+        "Relancez quand vous voulez : les 37 seront vus comme déjà présents.",
+    ]
+
+
+def test_le_bilan_d_un_arret_demande_s_accorde_au_singulier() -> None:
+    """Un lot de deux comptes arrêté au premier ne doit pas parler de « 1 restants »."""
+    rapport = Rapport(
+        comptes_crees=[CompteCree("dupont", "s3cr3t")],
+        interrompu=True,
+        motif_arret=MotifArret.OPERATEUR,
+        comptes_prevus=2,
+    )
+    assert lignes_du_rapport(rapport)[:4] == [
+        "Arrêt demandé.",
+        "1 compte créé sur 2 prévus.",
+        "Le compte restant n'a pas été touché.",
+        "Relancez quand vous voulez : le compte créé sera vu comme déjà présent.",
+    ]
+
+
+def test_le_bilan_d_un_arret_demande_ne_promet_rien_quand_aucun_compte_n_est_ne() -> None:
+    """Cas le plus fréquent : l'arrêt tombe pendant les lectures, avant la moindre
+    écriture. Le bilan ne doit pas parler d'« un compte créé » qui n'existe pas."""
+    rapport = Rapport(
+        interrompu=True,
+        motif_arret=MotifArret.OPERATEUR,
+        comptes_prevus=200,
+    )
+    assert lignes_du_rapport(rapport)[:4] == [
+        "Arrêt demandé.",
+        "0 compte créé sur 200 prévus.",
+        "Les 200 restants n'ont pas été touchés.",
+        "Relancez quand vous voulez : aucun compte n'a été créé, le lot repartira de zéro.",
+    ]
+
+
+def test_le_bilan_d_un_arret_demande_ne_parle_pas_de_zero_restant() -> None:
+    """Un plan qui ne prévoyait aucune création laisse un reste nul : « Les 0 restants »
+    se lit comme un décompte cassé."""
+    rapport = Rapport(
+        interrompu=True,
+        motif_arret=MotifArret.OPERATEUR,
+        comptes_prevus=0,
+    )
+    assert lignes_du_rapport(rapport)[2] == "Aucun compte ne restait à créer."
+
+
+def test_le_bilan_d_un_arret_demande_detaille_quand_meme_les_echecs() -> None:
+    """Un arrêt ne fait pas disparaître ce qui a échoué avant lui, ni les comptes à
+    reprendre à la main."""
+    rapport = Rapport(
+        comptes_crees=[CompteCree("dupont", "")],
+        echecs=[Echec("dupont", "USER PASSWORD", "refusé")],
+        interrompu=True,
+        motif_arret=MotifArret.OPERATEUR,
+        comptes_prevus=3,
+    )
+    lignes = lignes_du_rapport(rapport)
+    assert "dupont — USER PASSWORD : refusé" in lignes
+    assert "Comptes créés sans mot de passe — à reprendre" in lignes
+
+
+def test_au_repos_seul_lancer_est_actif() -> None:
+    etat = etat_des_boutons(lot_en_cours=False)
+    assert (etat.lancer, etat.arreter) == (True, False)
+
+
+def test_pendant_un_lot_seul_arreter_est_actif() -> None:
+    """Les deux boutons ne sont jamais actifs ensemble : *Arrêter* n'a rien à arrêter au
+    repos, et *Lancer* ferait partir un second lot sur le même boîtier."""
+    etat = etat_des_boutons(lot_en_cours=True)
+    assert (etat.lancer, etat.arreter) == (False, True)
+
+
+def test_le_clic_sur_arreter_a_sa_ligne_de_journal() -> None:
+    """Entre le clic et l'arrêt effectif, des comptes continuent d'apparaître pendant une
+    quinzaine de secondes plausibles — réessais de mot de passe, reconnexion. Sans signe
+    que sa demande existe, l'opérateur reclique ou ferme la fenêtre : justement ce que le
+    bouton remplace. La ligne dit donc que la demande est prise, et que le compte en cours
+    va d'abord à son terme."""
+    assert ARRET_DEMANDE_AU_CLIC.startswith("Arrêt demandé")
+    assert "compte en cours" in ARRET_DEMANDE_AU_CLIC
+    assert "terme" in ARRET_DEMANDE_AU_CLIC
+
+
+def test_une_demande_d_arret_neuve_ne_demande_rien() -> None:
+    assert DemandeArret()() is False
+
+
+def test_une_demande_d_arret_posee_se_lit_depuis_l_autre_fil() -> None:
+    """Le clic a lieu dans le fil de l'interface, la lecture dans le fil d'exécution :
+    c'est le `threading.Event` qui rend la bascule visible de l'un à l'autre."""
+    demande = DemandeArret()
+    demande.demander()
+    assert demande() is True
+
+
+def test_une_demande_d_arret_posee_deux_fois_reste_posee() -> None:
+    """Rien n'interdit deux clics : le bouton reste actif jusqu'au bilan."""
+    demande = DemandeArret()
+    demande.demander()
+    demande.demander()
+    assert demande() is True
+
+
+def test_travailler_porte_la_demande_d_arret_jusqu_a_executer() -> None:
+    """Le câblage est la fonctionnalité : une demande qui n'arriverait pas au métier
+    laisserait un bouton sans effet."""
+    boitier = BoitierMemoire()
+    messages, publier = collecter()
+    demande = DemandeArret()
+    demande.demander()
+    travailler(
+        parametres(simulation=False),
+        [utilisateur("dupont")],
+        publier,
+        arret=demande,
+        fabriquer_boitier=lambda _: boitier,
+    )
+    assert boitier.utilisateurs == []
+    bilans = [message for message in messages if isinstance(message, Termine)]
+    assert bilans[0].rapport.motif_arret is MotifArret.OPERATEUR
 
 
 # --- séparation de deux lots ----------------------------------------------

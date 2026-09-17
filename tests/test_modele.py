@@ -64,6 +64,20 @@ def test_un_rapport_porte_le_motif_d_arret_qu_on_lui_donne() -> None:
     assert Rapport(interrompu=True, motif_arret=MotifArret.FATAL).motif_arret is MotifArret.FATAL
 
 
+def test_un_arret_demande_par_l_operateur_est_un_motif_a_part() -> None:
+    """Troisième fin possible, distincte des deux autres : rien n'est tombé et rien n'est
+    à corriger, ce sont les comptes non entamés qui le sont restés."""
+    rapport = Rapport(interrompu=True, motif_arret=MotifArret.OPERATEUR, comptes_prevus=200)
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+    assert rapport.comptes_prevus == 200
+
+
+def test_un_rapport_neuf_ne_prevoit_aucun_compte() -> None:
+    """`comptes_prevus` n'a de sens qu'une fois le plan construit : avant, il n'y a rien
+    à annoncer, pas même un total inconnu."""
+    assert Rapport().comptes_prevus == 0
+
+
 def test_le_mot_de_passe_d_un_compte_cree_ne_figure_pas_dans_son_repr() -> None:
     """Fuite latente : aucun chemin ne l'affiche aujourd'hui, mais une ligne de journal
     ajoutée un jour, une assertion de test qui échoue ou un formateur de trace suffirait.

@@ -197,7 +197,7 @@ se fige proprement en `.exe`, sans dépendance externe à embarquer.
 │                                                      │
 │ [x] Simulation (aucune écriture)                     │
 │ [x] Vérifier le certificat du firewall               │
-│                                         [ Lancer ]   │
+│                            [ Lancer ] [ Arrêter ]    │
 │ ┌──────────────────────────────────────────────────┐ │
 │ │ 12 lignes lues, 0 rejet                          │ │
 │ │ Groupes à créer : compta_bis (1 membre)          │ │
@@ -223,6 +223,44 @@ s'active dès la première création, avec ou sans mot de passe.
 
 Le journal est sélectionnable et copiable. L'outil n'écrit aucun fichier de journal : la
 seule écriture sur disque est le CSV des mots de passe, à un emplacement choisi.
+
+### Arrêter un lot en cours
+
+Le bouton *Arrêter* est posé **à côté** de *Lancer*, jamais à sa place : l'état de l'outil se
+lit ainsi d'un coup d'œil. Au repos, *Lancer* est actif et *Arrêter* grisé ; pendant un lot,
+l'inverse. Les deux ne sont jamais actifs ensemble — *Arrêter* n'a rien à arrêter au repos, et
+*Lancer* ferait partir un second lot sur le même boîtier pendant que le premier y écrit.
+
+Le clic ne demande **aucune confirmation** : qui clique sur *Arrêter* est déjà pressé, et
+relancer ne coûte rien puisque l'outil est idempotent.
+
+L'exécution regarde si l'arrêt a été demandé **entre deux comptes et entre deux groupes**,
+jamais au milieu de l'un d'eux : **le compte déjà entamé va jusqu'à son terme** —
+`USER CREATE`, `USER PASSWORD`, puis les rattachements. C'est tout l'intérêt de ce bouton. La
+seule issue qu'il remplace était de fermer la fenêtre, ce qui tue le fil n'importe où, y
+compris entre `USER CREATE` et `USER PASSWORD` : le compte resterait créé sans mot de passe
+utilisable, et la règle d'ajout seul interdit qu'un relancement le corrige.
+
+Le bouton agit aussi **en simulation**, et non parce qu'elle serait longue : `USER LIST` rend
+tout d'un coup, une simulation compte quatre commandes que le CSV porte deux lignes ou deux
+cents, et elle s'achève en une seconde ou deux. Le motif est l'interface : l'état des deux
+boutons ne doit pas dépendre du mode, et un bouton qui ne réagirait que dans un cas sur deux
+serait déroutant. N'ayant rien à écrire ensuite, la simulation n'offre qu'un point d'arrêt :
+la fin de sa lecture, une fois le plan affiché.
+
+Le bilan est une **troisième fin possible**, distincte du lot mené à terme et du lot
+interrompu par une panne. Il dit combien de comptes sont nés, que les suivants n'ont pas été
+touchés, et que relancer est sans danger :
+
+```
+Arrêt demandé.
+37 comptes créés sur 200 prévus.
+Les 163 restants n'ont pas été touchés.
+Relancez quand vous voulez : les 37 seront vus comme déjà présents.
+```
+
+Le bouton *Enregistrer les mots de passe…* reste disponible pour les comptes créés, comme sur
+tous les autres chemins d'arrêt.
 
 ### Simulation
 
@@ -330,6 +368,9 @@ séquentiels, soit plusieurs minutes.
 
 L'exécution part donc dans un thread. Ce thread ne touche jamais un widget tkinter — il publie
 ses événements de progression dans une file que la fenêtre vide périodiquement via `after()`.
+Une seule chose circule en sens inverse, l'ordre d'arrêt, porté par un `threading.Event` : sa
+pose et sa lecture sont atomiques et la bascule est publiée au fil qui lit, ce qu'un attribut
+ordinaire ne promet pas.
 La barre de progression est fonctionnelle, pas décorative : elle affiche le nombre d'opérations
 accomplies sur le total planifié. En simulation elle couvre les seules lectures et s'arrête à
 l'affichage du plan ; Simulation décochée, elle couvre en outre les écritures — créations de
@@ -391,6 +432,11 @@ locale de ces interdits (voir « Points non vérifiés ») : un `uid` refusé se
 
 Les étapes 1 à 4 se déroulent à l'identique dans les deux modes.
 
+L'arrêt demandé par l'opérateur est consulté à la fin de l'étape 4 — seul point d'arrêt
+d'une simulation, et ce qui évite de demander l'autorisation d'écrire un lot déjà arrêté —
+puis avant chaque groupe et avant chaque compte de l'étape 5 (voir « Arrêter un lot en
+cours »).
+
 ## Comportement en panne et idempotence
 
 **Panne réseau** : trois tentatives de reconnexion, espacées de deux secondes, puis arrêt net.
@@ -432,7 +478,8 @@ suffit.
 l'identifiant en minuscules, motifs de rejet, doublons y compris inter-casse), `motdepasse`
 (respect de la politique), `plan` (les quatre situations de rapprochement, le calcul des
 groupes à créer et de leurs membres), `execution` contre le `BoitierMemoire` (ordre des
-appels, échec isolé, arrêt après reconnexions, reprise), `sortie` (contenu et encodage du CSV,
+appels, échec isolé, arrêt après reconnexions, reprise, arrêt demandé — compte en cours
+mené à son terme, suivant non entamé, simulation comprise), `sortie` (contenu et encodage du CSV,
 restriction aux comptes créés).
 
 On teste des comportements, pas des rouages : aucun test ne vérifie qu'une fonction interne a
