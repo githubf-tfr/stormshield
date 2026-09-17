@@ -223,7 +223,7 @@ def _lignes(reponse: Any) -> list[CaseInsensitiveDict[Any]]:
     construit la ligne dans un `dict` nu, jeton par jeton, donc sensible à la casse — et
     `dict(ligne)` effaçait la même insensibilité partout ailleurs. Si serverd étiquette
     `Domain` là où l'outil lit `domain`, `lister_annuaires()` rend une liste vide : le
-    boîtier est vu comme vierge, `lire_etat` lève `AnnuaireAbsent`, et la revérification de
+    boîtier est vu comme vierge, `lire_socle` lève `AnnuaireAbsent`, et la revérification de
     `creer_annuaire` — même mesure, même résultat — laisse passer le seul
     `CONFIG LDAP INITIALIZE` du produit, qui écrase la base d'un annuaire existant.
     """

@@ -41,7 +41,7 @@ class Boitier(Protocol):
     def initialiser_annuaire(
         self, domainname: str, organisation: str, dc: str, mot_de_passe: str
     ) -> None:
-        """CONFIG LDAP INITIALIZE. Chemin conditionnel : voir execution.lire_etat."""
+        """CONFIG LDAP INITIALIZE. Chemin conditionnel : voir execution.lire_socle."""
         ...
 
     def activer_annuaire(self) -> None: ...

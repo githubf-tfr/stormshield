@@ -199,6 +199,11 @@ class Rapport:
     # se juge à ce qu'il laisse derrière lui : sans ce total, le bilan pourrait dire
     # combien de comptes sont nés, jamais combien n'ont pas été touchés.
     comptes_prevus: int = 0
+    # Faux tant que la phase de lecture n'a pas abouti à un plan. `comptes_prevus` vaut
+    # alors zéro faute d'avoir été compté, et non parce que rien n'était à créer : sans
+    # cette distinction, un arrêt tombé pendant la lecture se raconterait comme un lot
+    # dont le plan ne prévoyait aucune création.
+    plan_construit: bool = False
 
     @property
     def sans_mot_de_passe(self) -> list[CompteCree]:

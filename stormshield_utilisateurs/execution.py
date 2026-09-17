@@ -27,10 +27,16 @@ from stormshield_utilisateurs.modele import (
     TravailCompte,
     Utilisateur,
 )
-from stormshield_utilisateurs.rapprochement import IndexBoitier
+from stormshield_utilisateurs.rapprochement import IndexBoitier, cle
 
-# CONFIG LDAP LIST, CONFIG PASSWDPOLICY SHOW, USER LIST, USER GROUP LIST.
-NOMBRE_LECTURES = 4
+# CONFIG LDAP LIST, CONFIG PASSWDPOLICY SHOW, USER LIST, USER GROUP LIST. La part fixe
+# de la lecture : le total vaut `LECTURES_DE_BASE + g`, où `g` est le nombre de groupes
+# cités par le fichier et reconnus sur le boîtier — connu seulement après la quatrième.
+LECTURES_DE_BASE = 4
+
+
+def _rien() -> None:
+    """Défaut neutre : la lecture d'inventaire se teste sans compteur ni barre."""
 
 # Tours de reconnexion consécutifs sans écriture aboutie que le lot tolère avant de
 # s'arrêter. Un seul, parce qu'une coupure sur la première commande d'écriture laisse
@@ -67,41 +73,6 @@ class AnnuairesMultiples(Exception):
             + ", ".join(annuaires)
             + ". L'outil s'arrête plutôt que de choisir."
         )
-
-
-def lire_etat(boitier: Boitier) -> EtatBoitier:
-    """Lecture seule. L'ordre est celui du flux d'exécution de la spec.
-
-    Ouverture de session : les quatre lectures, avec le traitement des trois cas
-    d'annuaire. En cas de reprise après coupure réseau en milieu de lot, utiliser
-    plutôt `lire_comptes_et_groupes`, qui ne relit pas l'annuaire ni la politique.
-    """
-    annuaires = boitier.lister_annuaires()
-    if not annuaires:
-        raise AnnuaireAbsent("le boîtier ne déclare aucun annuaire LDAP interne")
-    if len(annuaires) > 1:
-        raise AnnuairesMultiples(tuple(annuaires))
-    plancher = boitier.lire_politique()
-    return EtatBoitier(
-        domaine=annuaires[0],
-        plancher=plancher,
-        comptes=IndexBoitier.depuis(boitier.lister_utilisateurs()),
-        groupes=IndexBoitier.depuis(boitier.lister_groupes()),
-    )
-
-
-def lire_comptes_et_groupes(boitier: Boitier) -> tuple[IndexBoitier, IndexBoitier]:
-    """Reprise après reconnexion en milieu de lot : `USER LIST` et `USER GROUP LIST`
-    seulement. Ni l'annuaire (lèverait `AnnuaireAbsent` sur un lot déjà entamé), ni
-    la politique (ne change pas pendant un lot).
-
-    Deux index et non deux ensembles : c'est l'ordre des graphies rendues par le boîtier
-    qui tranche une collision de casse, et un `frozenset` le détruirait.
-    """
-    return (
-        IndexBoitier.depuis(boitier.lister_utilisateurs()),
-        IndexBoitier.depuis(boitier.lister_groupes()),
-    )
 
 
 def creer_annuaire(
@@ -226,6 +197,82 @@ def jamais_arrete() -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class Socle:
+    """Les quatre lectures fixes. C'est `groupes` qui dit combien d'autres suivront."""
+
+    domaine: str
+    plancher: PlancherPolitique
+    comptes: IndexBoitier
+    groupes: IndexBoitier
+
+
+def lire_socle(boitier: Boitier) -> Socle:
+    """Lecture seule, dans l'ordre du flux d'exécution de la spec, avec le traitement
+    des trois cas d'annuaire. Les adhésions se lisent ensuite, avec `lire_adhesions`."""
+    annuaires = boitier.lister_annuaires()
+    if not annuaires:
+        raise AnnuaireAbsent("le boîtier ne déclare aucun annuaire LDAP interne")
+    if len(annuaires) > 1:
+        raise AnnuairesMultiples(tuple(annuaires))
+    plancher = boitier.lire_politique()
+    return Socle(
+        domaine=annuaires[0],
+        plancher=plancher,
+        comptes=IndexBoitier.depuis(boitier.lister_utilisateurs()),
+        groupes=IndexBoitier.depuis(boitier.lister_groupes()),
+    )
+
+
+def lire_adhesions(
+    boitier: Boitier,
+    identites: Sequence[str],
+    *,
+    emettre: Emetteur,
+    arret_demande: ArretDemande = jamais_arrete,
+    apres_chaque: Callable[[], None] = _rien,
+) -> dict[str, tuple[str, ...]]:
+    """Un `USER GROUP SHOW` par groupe cité et reconnu, dans l'ordre reçu.
+
+    L'arrêt est consulté **entre deux lectures**, jamais au milieu de l'une d'elles : la
+    phase n'est plus l'affaire de quatre commandes, et un bouton *Arrêter* inerte
+    pendant qu'elle dure serait un bouton qui ment. Une lecture interrompue ne construit
+    aucun plan et n'écrit rien.
+    """
+    membres: dict[str, tuple[str, ...]] = {}
+    for identite in identites:
+        _verifier_arret(arret_demande)
+        try:
+            membres[cle(identite)] = tuple(boitier.lister_membres(identite))
+        except ErreurCommande as erreur:
+            # Un groupe sans membre peut rendre une section vide ou un refus : les deux
+            # se traitent comme « aucun membre connu ». Au pire des ADDUSER redondants
+            # partiront, que le boîtier absorbera ou refusera.
+            membres[cle(identite)] = ()
+            emettre(
+                Journal(
+                    f"groupe {identite} : membres illisibles ({erreur}) — ses adhésions "
+                    "seront toutes considérées comme manquantes"
+                )
+            )
+        apres_chaque()
+    return membres
+
+
+def relire_inventaire(
+    boitier: Boitier, cites: Sequence[str], emettre: Emetteur
+) -> tuple[IndexBoitier, IndexBoitier, dict[str, tuple[str, ...]]]:
+    """Reprise après reconnexion : comptes, groupes et **tout** l'inventaire des
+    adhésions. Ni l'annuaire (lèverait `AnnuaireAbsent` sur un lot déjà entamé), ni la
+    politique (ne change pas pendant un lot)."""
+    comptes = IndexBoitier.depuis(boitier.lister_utilisateurs())
+    groupes = IndexBoitier.depuis(boitier.lister_groupes())
+    membres = lire_adhesions(
+        boitier, construction_plan.groupes_a_interroger(cites, groupes), emettre=emettre
+    )
+    return comptes, groupes, membres
+
+
 class _ArretParLOperateur(Exception):
     """Interne : l'opérateur a cliqué sur *Arrêter*, l'unité de travail suivante n'est
     pas entamée.
@@ -315,25 +362,40 @@ def executer(
                 )
             )
     try:
+        cites = construction_plan.groupes_cites(utilisateurs)
         boitier.connecter()
-        etat = lire_etat(boitier)
-        emettre(PolitiqueLue(etat.plancher))
+        socle = lire_socle(boitier)
+        emettre(PolitiqueLue(socle.plancher))
         # Le plancher qui fait foi est celui du boîtier que l'on vient de lire, jamais
         # celui qu'un lancement antérieur aurait laissé en mémoire : changer d'hôte
         # entre deux lots suffirait à écrire sous le plancher du nouveau.
-        manquements = tuple(motdepasse.violations(politique, etat.plancher))
+        manquements = tuple(motdepasse.violations(politique, socle.plancher))
         if manquements:
-            _arreter_politique(rapport, emettre, manquements, etat.plancher)
+            _arreter_politique(rapport, emettre, manquements, socle.plancher)
         else:
+            identites = construction_plan.groupes_a_interroger(cites, socle.groupes)
+            # Le nombre exact de lectures n'est connu qu'ici : USER GROUP LIST vient de
+            # dire lesquels des groupes cités existent déjà.
+            compteur.fixer_total(LECTURES_DE_BASE + len(identites))
+            for _ in range(LECTURES_DE_BASE):
+                compteur.avancer()
+            etat = EtatBoitier(
+                domaine=socle.domaine,
+                plancher=socle.plancher,
+                comptes=socle.comptes,
+                groupes=socle.groupes,
+                membres_par_groupe=lire_adhesions(
+                    boitier, identites, emettre=emettre,
+                    arret_demande=arret_demande, apres_chaque=compteur.avancer,
+                ),
+            )
             plan_courant = construction_plan.construire(utilisateurs, etat, rejets)
             # Figé ici : un plan reconstruit après reconnexion ne compte plus que le
             # reste, et le bilan d'un arrêt doit se dire contre ce qui était prévu.
             rapport.comptes_prevus = len(plan_courant.creations)
-            compteur.fixer_total(
-                NOMBRE_LECTURES + (0 if simulation else plan_courant.nombre_operations())
-            )
-            for _ in range(NOMBRE_LECTURES):
-                compteur.avancer()
+            # Deux faits distincts : combien de comptes étaient prévus, et qu'il y ait
+            # eu un plan du tout. Un arrêt tombé plus haut n'a ni l'un ni l'autre.
+            rapport.plan_construit = True
             emettre(PlanPret(plan_courant))
             # Seul point d'arrêt d'une simulation, qui n'a rien à écrire ensuite ; en
             # lot réel il évite de poser une question sur un lot déjà arrêté.
@@ -343,12 +405,16 @@ def executer(
             if not simulation and not confirmer(plan_courant):
                 emettre(Journal(ABANDON_A_LA_CONFIRMATION))
             elif not simulation:
+                # Seule croissance admise du total, et elle suit immédiatement l'accord
+                # donné sur le nombre d'opérations lu dans la boîte de confirmation.
+                compteur.fixer_total(compteur.accomplies + plan_courant.nombre_operations())
                 _appliquer(
                     boitier,
                     utilisateurs,
                     etat,
                     plan_courant,
                     rejets,
+                    cites,
                     politique,
                     rapport,
                     compteur,
@@ -378,6 +444,7 @@ def _appliquer(
     etat: EtatBoitier,
     plan_courant: Plan,
     rejets: Sequence[Rejet],
+    cites: Sequence[str],
     politique: PolitiqueMotDePasse,
     rapport: Rapport,
     compteur: _Compteur,
@@ -407,7 +474,9 @@ def _appliquer(
                 return
             # On ne rejoue jamais la commande interrompue : on relit et on replanifie.
             try:
-                reste = _replanifier(boitier, utilisateurs, etat, rejets, refuses)
+                reste = _replanifier(
+                    boitier, utilisateurs, etat, rejets, cites, refuses, emettre
+                )
             except ErreurFatale:
                 # Classe fille d'ErreurBoitier : à intercepter avant elle, sinon
                 # cette clause ne serait jamais atteinte.
@@ -487,8 +556,22 @@ def _verifier_arret(arret_demande: ArretDemande) -> None:
 
 
 def _arreter_par_l_operateur(rapport: Rapport, emettre: Emetteur) -> None:
-    """Arrêt sur ordre : ni panne à attendre, ni erreur à corriger avant de relancer."""
+    """Arrêt sur ordre : ni panne à attendre, ni erreur à corriger avant de relancer.
+
+    Deux textes, parce que l'arrêt a désormais deux moments possibles. Avant le plan,
+    aucun compte n'était en cours : dire qu'il est allé à son terme serait faux, et
+    l'opérateur chercherait dans le journal un compte qui n'existe pas.
+    """
     _marquer_arret(rapport, MotifArret.OPERATEUR)
+    if not rapport.plan_construit:
+        emettre(
+            Journal(
+                "arrêt demandé pendant la lecture de l'état du firewall : aucun plan "
+                "n'a été construit, aucun compte n'a été entamé, rien n'a été écrit. "
+                "Relancer est sans danger : le lot repartira de la première lecture."
+            )
+        )
+        return
     emettre(
         Journal(
             "arrêt demandé : le compte en cours est allé à son terme, les suivants n'ont "
@@ -521,18 +604,25 @@ def _arreter_politique(
 
 
 def _replanifier(
-    boitier: Boitier, utilisateurs: Sequence[Utilisateur], etat: EtatBoitier,
-    rejets: Sequence[Rejet], refuses: _Refuses,
+    boitier: Boitier,
+    utilisateurs: Sequence[Utilisateur],
+    etat: EtatBoitier,
+    rejets: Sequence[Rejet],
+    cites: Sequence[str],
+    refuses: _Refuses,
+    emettre: Emetteur,
 ) -> Plan:
-    """Reprise en milieu de lot : seuls les comptes et les groupes sont relus.
+    """Reprise en milieu de lot : comptes, groupes et **tout** l'inventaire des adhésions.
 
-    L'annuaire et le plancher de politique du premier état sont conservés : ni l'un
-    ni l'autre ne change pendant un lot, et les relire ferait lever `AnnuaireAbsent`
-    sur un chemin que rien ne décrit.
+    L'annuaire et le plancher de politique du premier état sont conservés : ni l'un ni
+    l'autre ne change pendant un lot, et les relire ferait lever `AnnuaireAbsent` sur un
+    chemin que rien ne décrit.
     """
-    comptes, groupes = lire_comptes_et_groupes(boitier)
+    comptes, groupes, membres = relire_inventaire(boitier, cites, emettre)
     plan_reconstruit = construction_plan.construire(
-        utilisateurs, replace(etat, comptes=comptes, groupes=groupes), rejets
+        utilisateurs,
+        replace(etat, comptes=comptes, groupes=groupes, membres_par_groupe=membres),
+        rejets,
     )
     # Ce que le boîtier a refusé ne repart pas : le refus est déjà au rapport, et le
     # rejouer le compterait une fois de plus sans rien créer.

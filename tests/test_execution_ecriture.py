@@ -2,10 +2,13 @@
 
 from collections.abc import Callable, Sequence
 
+from fabriques import _Interrupteur
+
 from stormshield_utilisateurs import motdepasse
 from stormshield_utilisateurs.boitier import ErreurCommande, ErreurFatale, ErreurReseau
 from stormshield_utilisateurs.boitier_memoire import BoitierMemoire, dn_de
 from stormshield_utilisateurs.execution import (
+    LECTURES_DE_BASE,
     CreationReussie,
     Evenement,
     Journal,
@@ -45,23 +48,6 @@ def _utilisateur(identifiant: str, *groupes: str, ligne: int = 2) -> Utilisateur
         prenom="Marie",
         groupes=groupes,
     )
-
-
-class _Interrupteur:
-    """Le bouton *Arrêter* de la fenêtre, réduit à ce que le métier en voit.
-
-    En production c'est un `threading.Event` posé depuis le fil de l'interface ; ici le
-    test le bascule lui-même, au moment exact qu'il veut éprouver.
-    """
-
-    def __init__(self, *, demande: bool = False) -> None:
-        self.demande = demande
-
-    def demander(self) -> None:
-        self.demande = True
-
-    def __call__(self) -> bool:
-        return self.demande
 
 
 def _lancer(
@@ -176,6 +162,7 @@ def test_simulation_lit_mais_n_ecrit_pas() -> None:
         "lire_politique",
         "lister_utilisateurs",
         "lister_groupes",
+        "lister_membres",
     }
     assert rapport.comptes_crees == []
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
@@ -648,8 +635,9 @@ def test_progression_atteint_le_total_quand_une_creation_echoue() -> None:
         boitier,
         [_utilisateur("dupont", "compta", "rh"), _utilisateur("legrand", ligne=3)],
     )
-    # 4 lectures + (USER CREATE + USER PASSWORD + 2 ADDUSER) + (USER CREATE + USER PASSWORD)
-    assert _progressions(evenements)[-1] == Progression(accomplies=10, total=10)
+    # 4 + 2 lectures + (USER CREATE + USER PASSWORD + 2 ADDUSER)
+    # + (USER CREATE + USER PASSWORD)
+    assert _progressions(evenements)[-1] == Progression(accomplies=12, total=12)
 
 
 def test_arret_definitif_gele_la_barre_sous_son_total() -> None:
@@ -672,9 +660,11 @@ def test_arret_definitif_gele_la_barre_sous_son_total() -> None:
     assert _progressions(evenements)[-1] == Progression(accomplies=5, total=8)
 
 
-def test_le_total_ne_croit_jamais_apres_un_recalcul() -> None:
-    """Contrat de fin de lot : un recalcul après reconnexion ne peut que faire
-    décroître le total, jamais le faire monter — la barre ne recule pas."""
+def test_un_recalcul_apres_reconnexion_ne_peut_que_faire_baisser_le_total() -> None:
+    """Moitié de l'invariant v1 qui survit. Le total croît une fois, à la confirmation
+    (`test_le_total_ne_croit_qu_une_fois_l_ecriture_confirmee`) ; passé cet instant, un
+    plan reconstruit ne compte plus que le reste et la barre suit à la baisse, plutôt que
+    de viser un total qu'aucune opération restante ne peut plus atteindre."""
     boitier = BoitierMemoire()
 
     def couper_apres_le_premier(operation: str, cible: str) -> None:
@@ -685,8 +675,22 @@ def test_le_total_ne_croit_jamais_apres_un_recalcul() -> None:
     boitier.declencheur = couper_apres_le_premier
     _, evenements = _lancer(boitier, [_utilisateur("dupont"), _utilisateur("legrand", ligne=3)])
     totaux = [progression.total for progression in _progressions(evenements)]
-    assert totaux == sorted(totaux, reverse=True)
-    assert totaux[-1] < totaux[0]
+    budget = max(totaux)
+    apres_la_confirmation = totaux[totaux.index(budget) :]
+    assert apres_la_confirmation == sorted(apres_la_confirmation, reverse=True)
+    assert totaux[-1] < budget
+
+
+def test_le_total_ne_croit_qu_une_fois_l_ecriture_confirmee() -> None:
+    """L'amendement de l'invariant v1 « le total ne croît jamais » survit, réduit à ce
+    seul moment : juste après que l'opérateur a lu le nombre d'opérations qu'il autorise."""
+    boitier = BoitierMemoire(groupes=["compta"])
+    _, evenements = _lancer(boitier, [_utilisateur("dupont", "compta")], simulation=False)
+    totaux = [progression.total for progression in _progressions(evenements)]
+    (plan,) = [message.plan for message in evenements if isinstance(message, PlanPret)]
+    assert totaux[0] == LECTURES_DE_BASE + 1  # le seul groupe cité existe déjà
+    assert totaux[-1] == totaux[0] + plan.nombre_operations()
+    assert totaux == sorted(totaux)
 
 
 def test_une_politique_sous_le_plancher_arrete_avant_toute_ecriture() -> None:
@@ -913,8 +917,9 @@ def test_un_arret_demande_avant_la_premiere_ecriture_ne_pose_pas_la_confirmation
 
 
 def test_la_barre_gele_sous_son_total_sur_un_arret_demande() -> None:
-    """Contrat de progression : la barre ne ment pas en s'achevant, et son total ne
-    croît jamais. C'est `rapport.interrompu` qui dit si le lot est allé au bout."""
+    """Contrat de progression : la barre ne ment pas en s'achevant. Son total ne croît
+    qu'une fois, à la confirmation de l'écriture — jamais après, et jamais sur un arrêt.
+    C'est `rapport.interrompu` qui dit si le lot est allé au bout."""
     boitier = BoitierMemoire()
     interrupteur = _Interrupteur()
 
