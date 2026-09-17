@@ -369,8 +369,6 @@ class Fenetre:
         # qui suivra ne réécrira pas ce qu'il a durci.
         if self.plancher is not None:
             self.politique = politique
-        # L'état des boutons ne se règle qu'au démarrage effectif du fil : tout ce qui
-        # précède peut encore rendre la main sans qu'aucun lot ne parte.
         # Le journal n'est jamais vidé : il n'a aucun autre exemplaire, et l'effacer
         # emporterait la liste des comptes à reprendre du lot précédent. Cette ligne
         # dit où le nouveau lot commence.
@@ -408,6 +406,8 @@ class Fenetre:
         # Le lot qui commence a droit à sa boîte : le silence ne valait que pour le
         # précédent.
         self.boite_incident.reinitialiser()
+        # L'état des boutons ne se règle qu'ici : tout ce qui précède le démarrage
+        # effectif du fil peut encore rendre la main sans qu'aucun lot ne parte.
         # Variables locales : rien de `self` ne doit voyager jusqu'au fil. `arret` est
         # un `threading.Event` enveloppé, sans le moindre widget : c'est le seul objet
         # que les deux fils partagent, et il ne circule que dans ce sens.
