@@ -682,8 +682,8 @@ def test_le_plan_annonce_groupes_comptes_presents_et_orphelins() -> None:
     assert lignes_du_plan(plan) == [
         "Groupes à créer : compta_bis (1 membre)",
         "dupont : à créer, rattaché à compta_bis",
-        "legrand : présent",
-        "Orphelins sur le boîtier : 1",
+        "legrand : présent — rien à faire",
+        "1 compte du boîtier ne figure pas dans le fichier : il ne sera pas touché.",
     ]
 
 

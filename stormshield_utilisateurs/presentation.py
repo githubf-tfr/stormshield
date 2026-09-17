@@ -40,6 +40,7 @@ from stormshield_utilisateurs.modele import (
     PolitiqueMotDePasse,
     Rapport,
     Rejet,
+    TravailCompte,
     Utilisateur,
 )
 
@@ -566,6 +567,30 @@ def lignes_du_fichier(utilisateurs: Sequence[Utilisateur], rejets: Sequence[Reje
     return lignes
 
 
+def _ligne_du_travail(travail: TravailCompte) -> str:
+    """Ce que l'outil va faire à ce compte : rien, ou des ajouts. Jamais « ignoré » —
+    un compte déjà présent n'est plus ignoré, et le journal dit ce qui lui arrive."""
+    adhesions = ", ".join(travail.adhesions)
+    if travail.a_creer:
+        return f"{travail.identifiant_cible} : à créer" + (
+            f", rattaché à {adhesions}" if travail.adhesions else ""
+        )
+    if travail.adhesions:
+        return f"{travail.identifiant_cible} : présent — ajouté à {adhesions}"
+    return f"{travail.identifiant_cible} : présent — rien à faire"
+
+
+def _ligne_des_orphelins(nombre: int) -> str:
+    """Un nombre, jamais une liste : sur un boîtier de 500 comptes et un fichier de 20,
+    la liste noyait le plan et les rejets — ce sur quoi l'opérateur doit se prononcer."""
+    if nombre == 1:
+        return "1 compte du boîtier ne figure pas dans le fichier : il ne sera pas touché."
+    return (
+        f"{nombre} comptes du boîtier ne figurent pas dans le fichier : "
+        "ils ne seront pas touchés."
+    )
+
+
 def lignes_du_plan(plan: Plan) -> list[str]:
     """Plan de rapprochement. Réécrit tel quel après une reconnexion, sur le plan reconstruit."""
     lignes: list[str] = []
@@ -575,16 +600,9 @@ def lignes_du_plan(plan: Plan) -> list[str]:
             for groupe in plan.groupes_a_creer
         )
         lignes.append(f"Groupes à créer : {details}")
-    for travail in plan.travaux:
-        if travail.a_creer:
-            rattachement = (
-                f", rattaché à {', '.join(travail.adhesions)}" if travail.adhesions else ""
-            )
-            lignes.append(f"{travail.identifiant_cible} : à créer{rattachement}")
-        else:
-            lignes.append(f"{travail.identifiant_cible} : présent")
+    lignes.extend(_ligne_du_travail(travail) for travail in plan.travaux)
     if plan.nombre_orphelins:
-        lignes.append(f"Orphelins sur le boîtier : {plan.nombre_orphelins}")
+        lignes.append(_ligne_des_orphelins(plan.nombre_orphelins))
     return lignes
 
 
