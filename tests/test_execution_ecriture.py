@@ -195,6 +195,35 @@ def test_aucun_mot_de_passe_genere_en_simulation() -> None:
     assert appels == []
 
 
+def test_aucun_mot_de_passe_n_est_pose_sur_un_compte_deja_present() -> None:
+    """La garantie que le nouveau périmètre met le plus à l'épreuve : l'outil écrit
+    désormais sur des comptes existants."""
+    boitier = BoitierMemoire(utilisateurs=["Jean.Dupont", "legrand"], groupes=["rh"])
+    _lancer(
+        boitier,
+        [_utilisateur("jean.dupont", "rh"), _utilisateur("legrand", ligne=3)],
+        simulation=False,
+    )
+    assert "definir_mot_de_passe" not in [operation for operation, _ in boitier.journal_appels]
+    assert boitier.mots_de_passe == {}
+
+
+def test_un_compte_ambigu_ne_recoit_rien_et_le_lot_continue() -> None:
+    """Ni création, ni adhésion, ni mot de passe — et les autres comptes du lot passent :
+    un boîtier mal rangé ne prive pas les deux cents autres."""
+    boitier = BoitierMemoire(
+        utilisateurs=["Jean.Dupont", "JEAN.DUPONT"], groupes=["rh"]
+    )
+    _lancer(
+        boitier,
+        [_utilisateur("jean.dupont", "rh"), _utilisateur("legrand", ligne=3)],
+        simulation=False,
+    )
+    assert boitier.membres.get("rh", []) == []
+    assert boitier.mots_de_passe.keys() == {"legrand"}
+    assert sorted(boitier.utilisateurs) == ["JEAN.DUPONT", "Jean.Dupont", "legrand"]
+
+
 def test_aucun_mot_de_passe_genere_quand_la_creation_echoue() -> None:
     """USER CREATE refusé : le secret n'est jamais tiré."""
     boitier = BoitierMemoire()
