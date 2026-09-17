@@ -241,10 +241,12 @@ seule issue qu'il remplace était de fermer la fenêtre, ce qui tue le fil n'imp
 compris entre `USER CREATE` et `USER PASSWORD` : le compte resterait créé sans mot de passe
 utilisable, et la règle d'ajout seul interdit qu'un relancement le corrige.
 
-Le bouton agit aussi **en simulation**. Elle ne fait que lire, mais lire deux cents comptes
-prend aussi du temps, et un bouton qui ne réagirait pas dans un cas sur deux serait déroutant.
-N'ayant rien à écrire ensuite, la simulation n'offre qu'un point d'arrêt : la fin de sa
-lecture, une fois le plan affiché.
+Le bouton agit aussi **en simulation**, et non parce qu'elle serait longue : `USER LIST` rend
+tout d'un coup, une simulation compte quatre commandes que le CSV porte deux lignes ou deux
+cents, et elle s'achève en une seconde ou deux. Le motif est l'interface : l'état des deux
+boutons ne doit pas dépendre du mode, et un bouton qui ne réagirait que dans un cas sur deux
+serait déroutant. N'ayant rien à écrire ensuite, la simulation n'offre qu'un point d'arrêt :
+la fin de sa lecture, une fois le plan affiché.
 
 Le bilan est une **troisième fin possible**, distincte du lot mené à terme et du lot
 interrompu par une panne. Il dit combien de comptes sont nés, que les suivants n'ont pas été
