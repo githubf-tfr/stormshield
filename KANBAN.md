@@ -120,8 +120,8 @@ groupes, ajoute des adhésions — et n'enlève jamais rien.
   rendue deux fois passait pour une ambiguïté ; les comptes et groupes ambigus
   n'atteignaient ni la boîte de confirmation ni le bilan final, qui annonçait « 0 échec »
   pendant qu'un compte n'avait rien reçu ; et le mélange du générateur de mots de passe
-  laissait huit mutants sur seize en vie, dont un qui ne déplaçait jamais le dernier
-  caractère.
+  ne déplaçait jamais le dernier caractère — un mutant sur onze survit encore après
+  correctif (mélange à l'envers).
 - **405 tests** passent (marqueur `firewall` exclu), `ruff` et `mypy` verts, aucun
   `# type: ignore`. Cahier de recette porté à 139 cas, `README.md` aligné sur la v2.
 

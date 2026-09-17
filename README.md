@@ -74,11 +74,11 @@ réclament ; un compte déjà présent — reconnu quelle que soit sa casse, `Je
 ligne `jean.dupont` — n'est **ni modifié, ni supprimé**, et reçoit seulement les adhésions de
 groupe que le CSV lui donne et que le boîtier n'a pas. La colonne `groupes` vide ne veut pas
 dire « aucun groupe » mais « je ne me prononce pas » : aucune adhésion n'est ajoutée. Si le
-boîtier porte deux graphies d'un même nom que seule la casse distingue — deux comptes ou deux
-groupes —, l'outil ne choisit pas à votre place : il le signale, ne touche à rien pour ce
-nom-là, et poursuit le lot. Les comptes du boîtier absents du CSV sont **comptés** en une
-ligne, jamais nommés, et jamais touchés. L'outil **n'enlève rien** : aucun compte supprimé ni
-désactivé, aucune appartenance de groupe retirée, aucun attribut corrigé.
+boîtier porte plusieurs graphies d'un même nom que seule la casse distingue — plusieurs
+comptes ou plusieurs groupes —, l'outil ne choisit pas à votre place : il le signale, ne
+touche à rien pour ce nom-là, et poursuit le lot. Les comptes du boîtier absents du CSV sont
+**comptés** en une ligne, jamais nommés, et jamais touchés. L'outil **n'enlève rien** : aucun
+compte supprimé ni désactivé, aucune appartenance de groupe retirée, aucun attribut corrigé.
 
 Si le journal annonce que des membres de groupes n'ont pas pu être reconnus, rien n'est cassé :
 l'outil renverra simplement les mêmes rattachements à chaque exécution, que le firewall
@@ -102,9 +102,9 @@ n'est pas bloqué : avant tout lot réel, une boîte de confirmation nomme l'hô
 nombre de comptes à créer, les groupes neufs et le nombre d'adhésions à ajouter — en signalant
 les groupes qui n'auraient qu'un seul membre, signature d'une coquille de saisie dans la
 colonne des groupes. Elle annonce aussi combien de comptes et de groupes du fichier **ne
-recevront rien** parce que le firewall en porte deux graphies que seule la casse distingue :
-l'outil ne tranche pas un doublon, et le bilan final les recompte. Rien n'est encore écrit à
-ce moment : l'opérateur peut renoncer.
+recevront rien** parce que le firewall en porte plusieurs graphies que seule la casse
+distingue : l'outil ne tranche pas un doublon, et le bilan final les recompte. Rien n'est
+encore écrit à ce moment : l'opérateur peut renoncer.
 
 ## Arrêter un lot en cours
 
