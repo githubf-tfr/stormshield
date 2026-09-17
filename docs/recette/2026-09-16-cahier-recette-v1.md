@@ -4,8 +4,8 @@ Recette fonctionnelle, **exécutée par un humain**, sur le `.exe` publié en re
 firewall SNS de maquette.
 
 > **Les cas marqués *(v2)* remplacent l'attendu d'origine.** La v2 — le boîtier déjà peuplé —
-> ne s'ajoute pas à la v1 : elle rend faux douze attendus déjà numérotés, corrigés en place
-> ci-dessous. Le numéro et l'intitulé de ces cas ne changent pas ; seul leur *Attendu* change.
+> ne s'ajoute pas à la v1 : elle rend faux ou incomplets **seize** attendus déjà numérotés,
+> corrigés en place ci-dessous. Le numéro et l'intitulé de ces cas ne changent pas ; seul leur *Attendu* change.
 > La section **R** rassemble les cas propres à la v2.
 
 ## Pourquoi ce cahier n'est pas une formalité
@@ -20,8 +20,7 @@ Deux modules entiers du produit n'ont **jamais été exécutés** :
   la forme des membres rendus par `USER GROUP SHOW`, la syntaxe de cette commande et la
   sensibilité du boîtier à la casse ; elles se confirment ou se démentent ici.
 
-Les tests unitaires (380, marqueur `firewall` exclu) prouvent que le code fait ce qui a été
-écrit. Ce cahier prouve que le produit fait ce qu'on attend. Les cas déjà couverts en
+Les tests unitaires prouvent que le code fait ce qui a été écrit. Ce cahier prouve que le produit fait ce qu'on attend. Les cas déjà couverts en
 unitaire y figurent donc **volontairement**.
 
 Un cas dont on ne peut pas dire s'il a réussi est un cas inutile : chaque *Attendu*
@@ -684,10 +683,15 @@ la fin de la lecture, juste après avoir répondu *Oui* à la confirmation, puis
 *Attendu* **(v2)** : le total vaut **4 + g lectures** + **1 par groupe neuf** + **2 par compte
 à créer** + **1 par adhésion**, où `g` est le nombre de groupes du CSV déjà présents (cas 23).
 Il **croît une fois et une seule**, juste **après la confirmation** : pendant toute la lecture
-il vaut `4 + g`, puis il saute au total complet dès que l'opérateur a répondu *Oui*. Il ne
-croît **plus jamais** ensuite — une reconnexion en cours de lot ne peut que le faire baisser
-(cas 80). L'étiquette part de `0 / 4 + g` et finit sur `total / total`, la barre pleine ; la
-valeur affichée ne recule jamais.
+il vaut `4 + g`, puis il saute au total complet dès que l'opérateur a répondu *Oui*. Ensuite il
+ne croît plus : une reconnexion en cours de lot le recalcule sur ce qui reste, et ce recalcul
+ne peut que le faire **baisser** (cas 80). **Une exception à consigner, qui n'est pas un KO** :
+si la relecture qui suit une reconnexion ne parvient pas à lire les membres d'un groupe — le
+journal porte alors « groupe <nom> : membres illisibles (…) — ses adhésions seront toutes
+considérées comme manquantes » —, les adhésions de ce groupe sont toutes replanifiées et le
+total peut remonter. Sans cette ligne au journal, un total qui remonte est un KO.
+L'étiquette part de `0 / 4 + g` et finit sur `total / total`, la barre pleine ; la valeur
+affichée ne recule jamais.
 *Verdict* : OK / KO —
 
 **57 — Accords du rapport final** · boîtier : oui
@@ -1287,11 +1291,13 @@ simulation, retiré avec la vague précédente.
 *Départ* : `lot-groupe-un-membre.csv`, compte et groupe `solo-recette` absents du boîtier.
 *Actions* : renseigner l'hôte et les identifiants, **décocher Simulation dès le premier
 lancement**, cliquer sur *Lancer*.
-*Attendu* : le plan s'affiche au journal, **puis** une boîte « Écrire sur le firewall »
+*Attendu* **(v2)** : le plan s'affiche au journal, **puis** une boîte « Écrire sur le firewall »
 s'ouvre avant toute écriture. Elle nomme l'hôte visé, annonce « 1 compte à créer, 1 groupe
-neuf », liste « Groupes à créer : solo-recette (1 membre) » et **signale qu'un groupe neuf
-n'aurait qu'un seul membre**. Le bouton par défaut est *Non*. Après *Oui*, le lot se
-déroule normalement et le compte existe sur le boîtier.
+neuf », puis, **sur sa propre ligne, « 1 adhésion à ajouter. »** — au singulier —, liste
+« Groupes à créer : solo-recette (1 membre) » et **signale qu'un groupe neuf n'aurait qu'un
+seul membre**. Le bouton par défaut est *Non*. Après *Oui*, le lot se déroule normalement et
+le compte existe sur le boîtier, **membre de `solo-recette`**. Le contenu complet de la boîte
+se vérifie au cas 135.
 *Verdict* : OK / KO —
 
 **112 — Renoncer à la confirmation n'écrit rien** · boîtier : oui
@@ -1358,7 +1364,7 @@ apparue du fait de l'arrêt.
 lot s'arrête, ce qu'il ignore c'est où il en était.
 *Départ* : cas 115 joué.
 *Actions* : lire les quatre premières lignes du bilan, et la barre de progression.
-*Attendu* : le bilan est exactement de cette forme, avec les nombres du lot joué —
+*Attendu* **(v2)** : le bilan est exactement de cette forme, avec les nombres du lot joué —
 « **Arrêt demandé.** », « **N comptes créés sur 200 prévus.** », « **Les M restants n'ont
 pas été touchés.** », « **Relancez quand vous voulez : les N seront vus comme déjà
 présents.** ».
@@ -1366,7 +1372,8 @@ N + M vaut le nombre de comptes à créer annoncé par le plan — pas le nombre
 que le boîtier peut déjà porter en partie —, et N est le nombre de comptes réellement apparus
 sur le boîtier. Le bilan ne
 parle **ni** de liaison tombée, **ni** de quoi que ce soit à corriger. La barre **gèle sous
-son total** ; son total n'a pas augmenté.
+son total** ; **son total n'a plus augmenté depuis la confirmation** — il a bien crû une fois,
+à cet instant-là et à cet instant seulement (cas 56), et l'arrêt ne l'a pas fait bouger.
 *Verdict* : OK / KO —
 
 **117 — Après l'arrêt, les boutons reprennent leur état de repos** · boîtier : oui
@@ -1413,13 +1420,24 @@ recommencer sur un boîtier sans ces groupes, ou noter NJ.
 **120 — Arrêt avant la confirmation d'écriture** · boîtier : oui
 *Objectif* : un lot que l'opérateur vient d'arrêter ne doit pas lui poser de question, ni rien
 envoyer.
-*Départ* : `lot-200.csv`, **Simulation décochée** ; relever la liste des comptes et des
-groupes avant.
+*Départ* : `lot-200.csv`, **Simulation décochée** ; relever la liste des comptes et des groupes
+avant. **Retirer d'abord du boîtier les trois groupes que le CSV cite** — les cas 82, 83 et 118
+les y ont fait créer — de sorte que `g = 0`, exactement comme au cas 119 et pour la même
+raison. À défaut, voir l'issue alternative ci-dessous.
 *Actions* : cliquer *Lancer*, puis *Arrêter* **pendant la lecture**, avant que la boîte
 « Écrire sur le firewall » n'apparaisse. **Noter NJ si le moment ne peut pas être visé.**
-*Attendu* : la boîte de confirmation **ne s'ouvre pas**. Le bilan est celui d'un arrêt demandé
-avec « 0 compte créé », et le boîtier relu est **strictement identique** à son état de
-départ.
+*Attendu* **(v2)** : la boîte de confirmation **ne s'ouvre pas**, **rien n'est envoyé au
+boîtier**, et le boîtier relu est **strictement identique** à son état de départ. Cette partie
+de l'attendu est vraie quel que soit l'instant du clic, et c'est elle que le cas éprouve.
+Avec `g = 0`, le bilan est celui d'un arrêt demandé **après** la construction du plan :
+« 0 compte créé sur … prévus », quatrième ligne « Relancez quand vous voulez : aucun compte
+n'a été créé, le lot repartira de zéro. » — le même qu'au cas 119.
+*Issue alternative, à consigner et non à compter KO* : si les trois groupes sont restés sur le
+boîtier, `g = 3`, et un clic tombé pendant la lecture des adhésions atteint un point d'arrêt
+**antérieur au plan**. Le bilan est alors celui du cas 132 — « Le lot s'est arrêté pendant la
+lecture de l'état du firewall : aucun plan n'a été construit. » — et il ne contient nulle part
+« 0 compte créé ». Les deux bilans sont corrects ; ce qui serait un KO, dans les deux cas, est
+que la boîte de confirmation s'ouvre ou qu'une écriture parte.
 *Verdict* : OK / KO / NJ —
 
 **121 — Les mots de passe des comptes créés restent enregistrables** · boîtier : oui
@@ -1495,7 +1513,11 @@ en simulation avec ce CSV et lire les deux lignes du plan qui concernent ces deu
 (a) la réponse brute porte une section **`[Group]`** et des champs **`member=`**,
 **`member_2=`**, … chacun portant un **DN commençant par `uid=`**. Consigner la réponse mot
 pour mot : elle est la référence de tout le reste ;
-(b) le nombre de champs `member…` comptés dans ce texte vaut **2** ;
+(b) le nombre de champs `member…` comptés dans ce texte vaut **2**. La console et l'outil sont
+**deux transports de la même commande serverd** : si le firewall permet de relever la réponse
+telle que l'API la rend (la trace des commandes du cas 131), la préférer. À défaut la réponse
+de console fait foi — et une divergence de **forme** entre les deux transports est elle-même à
+consigner, car c'est le format reçu par l'API qui décide de ce que l'outil lit ;
 (c) l'outil a lu **les deux** : les deux comptes s'affichent « **présent — rien à faire** », et
 **aucun** ne s'affiche « présent — ajouté à <ce groupe> ».
 *Le KO silencieux à débusquer* : si **un seul** des deux comptes est annoncé « ajouté à » alors
@@ -1888,8 +1910,10 @@ donc une lecture préalable, donc un boîtier.
 
 ### Attendus de la v1 corrigés par la v2
 
-Ces cas gardent leur numéro et leur intitulé ; **seul leur *Attendu* a changé**, et il porte la
-mention *(v2)*. Un cahier v2 séparé aurait laissé un cahier v1 mensonger à côté de lui.
+**Seize cas.** Ils gardent leur numéro et leur intitulé ; **seul leur *Attendu* a changé**, et
+il porte la mention **(v2)**. Un cahier v2 séparé aurait laissé un cahier v1 mensonger à côté
+de lui. Quinze portaient un attendu devenu faux ; le cas 111 portait un attendu devenu
+**incomplet**, ce qui se paie de la même façon en recette.
 
 | Cas | Motif de la correction |
 |---|---|
@@ -1903,9 +1927,12 @@ mention *(v2)*. Un cahier v2 séparé aurait laissé un cahier v1 mensonger à c
 | **56** | le total vaut `4 + g` lectures + 1 par groupe neuf + 2 par compte à créer + 1 par adhésion, et il **croît une seule fois**, juste après la confirmation |
 | **70** | l'avertissement de perte ne parle plus de compte « ignoré » : les comptes « seront vus comme déjà présents et ne recevront plus que leurs adhésions manquantes » |
 | **83** | les comptes déjà créés sont vus comme présents, avec leurs adhésions manquantes éventuellement posées |
+| **111** | la boîte de confirmation annonce désormais les adhésions : « 1 adhésion à ajouter. » s'ajoute à l'énumération |
 | **115** | la ligne écrite au clic ne promet plus « le compte en cours » : elle part sans connaître la phase, et un arrêt pendant la lecture n'entame aucun compte |
+| **116** | le total de la barre **a** crû une fois, à la confirmation : « son total n'a pas augmenté » devient « n'a plus augmenté **depuis la confirmation** » |
 | **118** | même correction que le cas 83 ; la promesse du bilan — « relancer est sans danger » — reste ce que le cas vérifie |
 | **119** | la fenêtre d'arrêt vaut `4 + g` commandes, et le clic pendant la lecture des adhésions est un point d'arrêt à part entière, joué au cas **132** |
+| **120** | jumeau du 119, et faux pour la même cause : avec `g > 0` le clic tombe avant le plan et le bilan ne porte aucun « 0 compte créé ». Condition de départ posée, issue alternative renvoyée au cas **132** |
 
 ## Nettoyage après recette
 
