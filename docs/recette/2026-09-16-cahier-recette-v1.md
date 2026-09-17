@@ -1281,7 +1281,9 @@ comptes du CSV sous les yeux.
 *Actions* : cliquer une fois sur *Arrêter* ; noter le **dernier** identifiant porté par une
 ligne « … : créé » du journal, et celui qui le suit dans le CSV. Attendre le bilan, puis
 relire le boîtier (`USER LIST`, appartenances du groupe de ce compte).
-*Attendu* : le lot s'arrête **quelques secondes** après le clic, pas immédiatement. Le dernier
+*Attendu* : **dès le clic**, le journal porte la ligne « **Arrêt demandé : le compte en cours
+va d'abord à son terme, puis le lot s'arrête.** » — l'opérateur ne reste jamais sans réponse.
+Le lot s'arrête ensuite **quelques secondes** après le clic, pas immédiatement. Le dernier
 compte annoncé créé **existe** sur le boîtier et **est membre** du groupe que le CSV lui
 donne ; le compte suivant du CSV **n'existe pas** sur le boîtier. Aucune ligne d'échec n'est
 apparue du fait de l'arrêt.
@@ -1296,7 +1298,9 @@ lot s'arrête, ce qu'il ignore c'est où il en était.
 « **Arrêt demandé.** », « **N comptes créés sur 200 prévus.** », « **Les M restants n'ont
 pas été touchés.** », « **Relancez quand vous voulez : les N seront vus comme déjà
 présents.** ».
-N + M vaut 200, et N est le nombre de comptes réellement apparus sur le boîtier. Le bilan ne
+N + M vaut le nombre de comptes à créer annoncé par le plan — pas le nombre de lignes du CSV,
+que le boîtier peut déjà porter en partie —, et N est le nombre de comptes réellement apparus
+sur le boîtier. Le bilan ne
 parle **ni** de liaison tombée, **ni** de quoi que ce soit à corriger. La barre **gèle sous
 son total** ; son total n'a pas augmenté.
 *Verdict* : OK / KO —
@@ -1319,13 +1323,18 @@ sont créés, et le boîtier finit avec **exactement** 200 comptes, chacun une f
 *Verdict* : OK / KO —
 
 **119 — Arrêt pendant une simulation** · boîtier : oui
-*Objectif* : la simulation ne fait que lire, mais lire prend aussi du temps ; un bouton qui ne
-réagirait pas dans un cas sur deux serait déroutant.
+*Objectif* : l'état des deux boutons ne dépend pas du mode — un bouton qui ne réagirait que
+dans un cas sur deux serait déroutant —, et une simulation arrêtée le dit sans prétendre avoir
+créé quoi que ce soit.
 *Départ* : `lot-200.csv`, **Simulation cochée**.
-*Actions* : cliquer *Lancer*, puis *Arrêter* pendant la lecture du boîtier.
+*Actions* : cliquer *Lancer*, puis *Arrêter* pendant la lecture du boîtier. Cette fenêtre vaut
+quatre commandes, soit une seconde ou deux : **noter NJ si le moment ne peut pas être visé.**
 *Attendu* : le lot s'arrête, le bilan est celui d'un **arrêt demandé** et annonce « **0 compte
-créé sur … prévus** ». Le boîtier relu est **strictement identique** à son état de départ.
-*Verdict* : OK / KO —
+créé sur … prévus** ». Sa **quatrième ligne** est « **Relancez quand vous voulez : aucun compte
+n'a été créé, le lot repartira de zéro.** » — elle ne doit **pas** parler d'un « compte créé »
+qui serait vu comme déjà présent. Le boîtier relu est **strictement identique** à son état de
+départ.
+*Verdict* : OK / KO / NJ —
 
 **120 — Arrêt avant la confirmation d'écriture** · boîtier : oui
 *Objectif* : un lot que l'opérateur vient d'arrêter ne doit pas lui poser de question, ni rien
