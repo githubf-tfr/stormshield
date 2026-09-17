@@ -81,8 +81,15 @@ et `USER PASSWORD`.
   au fil d'exécution : seul objet partagé entre les deux, et le seul message à circuler
   dans ce sens. Le garde de structure de `test_presentation` refuse toujours la version
   qui prendrait cet objet sur `self`.
-- Le bouton agit aussi en simulation, dont le seul point d'arrêt est la fin de la lecture.
-- **296 tests**, `ruff` et `mypy` verts, aucun `# type: ignore`. Spécification amendée,
+- Le bouton agit aussi en simulation, dont le seul point d'arrêt est la fin de la lecture —
+  non qu'elle soit longue (quatre commandes quel que soit le CSV), mais parce que l'état
+  des deux boutons ne doit pas dépendre du mode.
+- Revue de branche : le bilan avait deux formes là où il en fallait trois — sur zéro compte
+  créé, cas le plus fréquent d'un arrêt demandé, il affirmait qu'un compte était né ; le
+  clic n'écrivait aucune ligne de journal, alors que l'arrêt effectif peut se faire attendre
+  une quinzaine de secondes ; et les deux boutons, posés dans les colonnes du cadre
+  principal, auraient été séparés par la largeur de la colonne des libellés.
+- **299 tests**, `ruff` et `mypy` verts, aucun `# type: ignore`. Spécification amendée,
   cahier de recette porté à 121 cas (section Q).
 
 ### Injection d'utilisateurs v1 (2026-09-16)
