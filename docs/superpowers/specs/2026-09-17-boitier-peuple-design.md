@@ -273,6 +273,14 @@ membre légitime que le CSV du jour ne cite pas n'y compte donc pas — le compt
 bruit, et c'est ce qui le rend lisible. Une forme de DN inattendue, elle, le fait bondir d'un
 coup.
 
+**La réciproque est fausse, et il faut le savoir avant de lire ce compteur : zéro ne prouve
+rien.** Il ne détecte qu'une mauvaise *forme de DN*, jamais un mauvais *format de réponse*. Si
+`USER GROUP SHOW` rend ses membres autrement qu'en champs `member=`, `member_2=`, …, les membres
+lus sont vides ou tronqués au premier : il n'y a rien à rattacher, le compteur reste à zéro, et
+toutes les adhésions repartent pourtant à chaque exécution. Dans ce cas précis, seul le texte
+brut de la réponse garde la vérité — à confronter à la trace au premier boîtier joignable, sans
+se fier au compteur seul.
+
 Quand ce nombre n'est pas nul, le journal porte une ligne dédiée, lisible sans connaître le
 code :
 
@@ -287,11 +295,11 @@ lecture — le fichier la décrivant, elle repartira à chaque exécution.
 
 Cette ligne ne provoque ni arrêt, ni refus, ni écriture en moins : un boîtier dont les membres ne
 se rattachent pas reste parfaitement utilisable, seule l'idempotence stricte s'en trouve dégradée
-(voir « Idempotence »). C'est aussi, concrètement, le seul signal qui confirme ou infirme
+(voir « Idempotence »). C'est aussi, concrètement, le seul signal automatique qui **infirme**
 l'hypothèse sur la forme du DN rendu par `USER GROUP SHOW` (voir « Points non vérifiés », point
-1) : à zéro sur un boîtier dont les groupes cités ont des membres, elle tient ; non nul, elle est
-fausse en tout ou partie. Aucune autre lecture n'est à faire de ce nombre — il n'y a pas de seuil
-« normal » au-dessus de zéro.
+1) : non nul, elle est fausse en tout ou partie. Il ne la confirme pas à lui seul — un format de
+réponse inattendu donne zéro tout autant (voir ci-dessus). Aucune autre lecture n'est à faire de
+ce nombre — il n'y a pas de seuil « normal » au-dessus de zéro.
 
 ### Groupes à créer
 
@@ -552,14 +560,18 @@ fausse* : aucun membre n'est rattaché, l'outil croit toutes les adhésions manq
 perdue**, et c'est le nombre de membres non rattachés (voir « Ce que le plan produit ») qui la
 rend visible sans attendre un second relancement : dès la première lecture, ce compteur dit
 combien de membres le boîtier a rendus sans que l'outil sache les relier à un compte **de la
-liste que ce même boîtier lui a donnée** — il vaut donc zéro tant que l'hypothèse tient, et
-saute d'un coup dès qu'elle est fausse ; sans lui, un lot qui réémet les mêmes ajouts a toutes
-les apparences d'un lot qui réussit. **Aucun dommage n'en découle** : rien n'est retiré, rien
+liste que ce même boîtier lui a donnée** — il saute d'un coup dès que la *forme du DN* n'est pas
+celle attendue ; sans lui, un lot qui réémet les mêmes ajouts a toutes les apparences d'un lot
+qui réussit. **Il ne vaut zéro que sur la moitié de l'hypothèse** : un *format de réponse*
+inattendu — champs répétés autrement, section absente — laisse les membres lus vides, donc rien
+à rattacher, donc zéro, pendant que toutes les adhésions repartent à chaque exécution (voir
+« Membres non rattachés : le canari de l'hypothèse sur le DN »). **Aucun dommage n'en découle** : rien n'est retiré, rien
 n'est écrasé, aucun compte ne change d'état. Le repli tient dans une fonction isolée :
 l'extraction de l'`uid` depuis un DN est le seul endroit à corriger quand la forme réelle sera
-connue. **C'est ce compteur, et lui seul, qui confirme ou
-infirme cette hypothèse — c'est la première chose que le cahier de recette observera au premier
-boîtier**, avant même de juger l'idempotence sur pièce. Non tranché également : ce que rend `USER GROUP SHOW` sur un groupe sans membre — section vide ou refus ; les
+connue. **C'est ce compteur qui infirme cette hypothèse, et c'est la première chose que le
+cahier de recette observera au premier boîtier**, avant même de juger l'idempotence sur pièce —
+mais un zéro ne la confirme pas : il faut pour cela lire la trace brute d'un `USER GROUP SHOW`
+sur un groupe dont on sait qu'il a des membres. Non tranché également : ce que rend `USER GROUP SHOW` sur un groupe sans membre — section vide ou refus ; les
 deux se traitent comme « aucun membre connu pour ce groupe ».
 
 **2. La forme rendue par `USER GROUP LIST`** — nom de groupe ou DN. Héritée de la v1, mais elle
@@ -594,6 +606,24 @@ touché pour aucun compte ; il n'est pas créé non plus, puisqu'il existe déj�
 Même traitement qu'un échec isolé : signalé, le lot continue — aucun concept nouveau n'entre dans
 le produit, et c'est mot pour mot la règle du point 3 pour les comptes : **une seule règle pour
 les deux rapprochements**. Le doublon ne peut être levé qu'à la main, sur le boîtier.
+
+**5. La complétude de `USER LIST` et de `USER GROUP LIST`.** Rien ne prouve que serverd rende la
+totalité des comptes en une réponse : ni troncature au-delà d'un nombre de lignes, ni pagination
+n'ont été vérifiées. Tout ce document raisonne pourtant sur « un boîtier de 500 comptes », et le
+`README.md` promet « quelques milliers de lignes ». *Si l'hypothèse est fausse*, le défaut est le
+plus coûteux de la v2, et le seul qui se répète : les comptes au-delà de la coupure sont vus
+**absents**, donc planifiés à créer ; `USER CREATE` est refusé « existe déjà » ; et un refus de
+création écarte toutes les adhésions de ce compte. La troncature étant persistante, ces adhésions
+sont écartées **à chaque exécution**, sans jamais partir. S'y ajoutent un compte d'orphelins
+faux — les comptes invisibles ne sont comptés nulle part — et une ambiguïté de casse que l'outil
+ne peut plus voir, l'une des deux graphies étant hors de la réponse.
+
+Rien dans le produit ne le détecte aujourd'hui : un compte vu absent puis refusé « existe déjà »
+est exactement ce qu'on observe sur un boîtier sain dont le fichier cite un compte créé entre
+deux lectures. Le seul indice est un **nombre anormal de refus « existe déjà » sur des comptes
+que le plan annonçait à créer**, et il faut le chercher. À trancher au premier boîtier joignable,
+en comparant le nombre de comptes rendus par `USER LIST` à celui que l'administration web
+affiche.
 
 Les points non vérifiés de la v1 restent ouverts et inchangés.
 

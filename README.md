@@ -13,6 +13,9 @@ rapprochement avec ce que le boîtier porte déjà, création des comptes manqua
 groupes qu'ils réclament, génération des mots de passe. Elle se présente en fenêtre unique,
 livrée en `.exe` Windows — l'opérateur visé n'a pas de terminal.
 
+La v2 ajoute la reconnaissance des comptes et des groupes déjà présents sur le boîtier, quelle
+que soit leur casse, et l'ajout des adhésions de groupe qui leur manquent.
+
 L'injection de blacklists reste à faire. L'avancement se lit dans
 [`KANBAN.md`](./KANBAN.md), les conventions pour qui modifie dans
 [`CLAUDE.md`](./CLAUDE.md).
@@ -66,15 +69,21 @@ Les lignes rejetées sont listées une à une au journal, avec leur numéro d'en
 
 ## Ce que l'outil fait, et ce qu'il ne fait pas
 
-Il **ajoute, et rien d'autre** :
+Il crée les comptes du CSV absents du boîtier et les groupes que les adhésions décrites
+réclament ; un compte déjà présent — reconnu quelle que soit sa casse, `Jean.Dupont` pour une
+ligne `jean.dupont` — n'est **ni modifié, ni supprimé**, et reçoit seulement les adhésions de
+groupe que le CSV lui donne et que le boîtier n'a pas. La colonne `groupes` vide ne veut pas
+dire « aucun groupe » mais « je ne me prononce pas » : aucune adhésion n'est ajoutée. Si le
+boîtier porte plusieurs graphies d'un même nom que seule la casse distingue — plusieurs
+comptes ou plusieurs groupes —, l'outil ne choisit pas à votre place : il le signale, ne
+touche à rien pour ce nom-là, et poursuit le lot. Les comptes du boîtier absents du CSV sont
+**comptés** en une ligne, jamais nommés, et jamais touchés. L'outil **n'enlève rien** : aucun
+compte supprimé ni désactivé, aucune appartenance de groupe retirée, aucun attribut corrigé.
 
-- il crée les comptes du CSV absents du boîtier, et les groupes que ces seuls comptes
-  réclament ;
-- un compte déjà présent est classé « déjà présent, ignoré » : il n'est **ni modifié, ni
-  supprimé**, ses appartenances de groupe comprises. Un groupe réclamé uniquement par un
-  compte déjà présent n'est donc pas créé ;
-- un compte présent sur le boîtier et absent du CSV est listé comme **orphelin** : il est
-  signalé, jamais touché.
+Si le journal annonce que des membres de groupes n'ont pas pu être reconnus, rien n'est cassé :
+l'outil renverra simplement les mêmes rattachements à chaque exécution, que le firewall
+absorbera ou refusera. Signalez ce nombre — c'est le seul signal qui dise que la forme des
+membres rendus par le firewall n'est pas celle que l'outil attend.
 
 Il n'y a **aucun fichier d'état local** : l'outil relit le boîtier à chaque lancement.
 Rejouer le même CSV sur un firewall déjà à jour n'écrit donc rien.
@@ -85,14 +94,17 @@ conforme, il ne l'écrit pas.
 ## Simulation
 
 La case **Simulation est cochée par défaut**. Cochée, l'outil se connecte, lit le boîtier et
-affiche le plan complet — comptes à créer, groupes à créer, comptes ignorés, orphelins —
-mais **n'écrit rien**.
+affiche le plan complet — ce qui arrive à chaque compte du fichier, les groupes à créer, le
+nombre de comptes du boîtier absents du fichier — mais **n'écrit rien**.
 
 Simulation permet de relire le plan avant de se décider, mais un premier lancement en réel
 n'est pas bloqué : avant tout lot réel, une boîte de confirmation nomme l'hôte visé, le
-nombre de comptes à créer et les groupes neufs — en signalant ceux qui n'auraient qu'un seul
-membre, signature d'une coquille de saisie dans la colonne des groupes. Rien n'est encore
-écrit à ce moment : l'opérateur peut renoncer.
+nombre de comptes à créer, les groupes neufs et le nombre d'adhésions à ajouter — en signalant
+les groupes qui n'auraient qu'un seul membre, signature d'une coquille de saisie dans la
+colonne des groupes. Elle annonce aussi combien de comptes et de groupes du fichier **ne
+recevront rien** parce que le firewall en porte plusieurs graphies que seule la casse
+distingue : l'outil ne tranche pas un doublon, et le bilan final les recompte. Rien n'est
+encore écrit à ce moment : l'opérateur peut renoncer.
 
 ## Arrêter un lot en cours
 
@@ -103,8 +115,9 @@ Le compte en cours de création va **jusqu'à son terme** — création, mot de 
 rattachements — et le suivant n'est pas entamé : c'est la différence avec la fermeture de la
 fenêtre, qui couperait le travail n'importe où et pourrait laisser un compte sans mot de
 passe utilisable. Le bilan annonce alors combien de comptes ont été créés et combien n'ont
-pas été touchés. Relancer le même CSV est sans danger : les comptes créés seront classés
-« déjà présent, ignoré ».
+pas été touchés. Relancer le même CSV est sans danger : les comptes créés seront vus comme
+déjà présents : ils ne seront ni modifiés ni recréés, et ne recevront que les adhésions de
+groupe que le CSV leur donne et que le firewall n'a pas.
 
 ## Mots de passe
 
@@ -117,9 +130,9 @@ Le bouton **« Enregistrer les mots de passe… »** s'active dès le premier co
 
 **Un mot de passe vide dans ce CSV signale un compte créé dont la pose du mot de passe a
 échoué** : le compte existe sur le boîtier, il n'a pas de mot de passe utilisable, et aucun
-relancement ne le réparera — il sera classé « déjà présent, ignoré ». Ces comptes sont à
-reprendre à la main ; le rapport final les regroupe sous « Comptes créés sans mot de passe
-— à reprendre ».
+relancement ne le réparera — il sera vu comme déjà présent, et son mot de passe ne sera
+jamais retouché. Ces comptes sont à reprendre à la main ; le rapport final les regroupe sous
+« Comptes créés sans mot de passe — à reprendre ».
 
 Lancer un nouveau lot, ou fermer la fenêtre, efface les mots de passe non enregistrés :
 l'outil le demande avant, et la réponse par défaut est **Non**. Enregistrez avant de

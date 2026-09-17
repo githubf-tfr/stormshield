@@ -24,11 +24,15 @@ from stormshield_utilisateurs.modele import (
     PolitiqueMotDePasse,
     Rapport,
     Rejet,
+    TravailCompte,
     Utilisateur,
 )
+from stormshield_utilisateurs.rapprochement import IndexBoitier, cle
 
-# CONFIG LDAP LIST, CONFIG PASSWDPOLICY SHOW, USER LIST, USER GROUP LIST.
-NOMBRE_LECTURES = 4
+# CONFIG LDAP LIST, CONFIG PASSWDPOLICY SHOW, USER LIST, USER GROUP LIST. La part fixe
+# de la lecture : le total vaut `LECTURES_DE_BASE + g`, où `g` est le nombre de groupes
+# cités par le fichier et reconnus sur le boîtier — connu seulement après la quatrième.
+LECTURES_DE_BASE = 4
 
 # Tours de reconnexion consécutifs sans écriture aboutie que le lot tolère avant de
 # s'arrêter. Un seul, parce qu'une coupure sur la première commande d'écriture laisse
@@ -36,6 +40,10 @@ NOMBRE_LECTURES = 4
 # pathologie. Au deuxième, plus rien ne distingue cette situation d'une écriture qui
 # retombe indéfiniment, et la boucle doit se fermer.
 TOURS_SANS_PROGRES_TOLERES = 1
+
+
+def _rien() -> None:
+    """Défaut neutre : la lecture d'inventaire se teste sans compteur ni barre."""
 
 
 class AnnuaireAbsent(Exception):
@@ -65,37 +73,6 @@ class AnnuairesMultiples(Exception):
             + ", ".join(annuaires)
             + ". L'outil s'arrête plutôt que de choisir."
         )
-
-
-def lire_etat(boitier: Boitier) -> EtatBoitier:
-    """Lecture seule. L'ordre est celui du flux d'exécution de la spec.
-
-    Ouverture de session : les quatre lectures, avec le traitement des trois cas
-    d'annuaire. En cas de reprise après coupure réseau en milieu de lot, utiliser
-    plutôt `lire_comptes_et_groupes`, qui ne relit pas l'annuaire ni la politique.
-    """
-    annuaires = boitier.lister_annuaires()
-    if not annuaires:
-        raise AnnuaireAbsent("le boîtier ne déclare aucun annuaire LDAP interne")
-    if len(annuaires) > 1:
-        raise AnnuairesMultiples(tuple(annuaires))
-    plancher = boitier.lire_politique()
-    return EtatBoitier(
-        domaine=annuaires[0],
-        plancher=plancher,
-        utilisateurs=frozenset(boitier.lister_utilisateurs()),
-        groupes=frozenset(boitier.lister_groupes()),
-    )
-
-
-def lire_comptes_et_groupes(boitier: Boitier) -> tuple[frozenset[str], frozenset[str]]:
-    """Reprise après reconnexion en milieu de lot : `USER LIST` et `USER GROUP LIST`
-    seulement. Ni l'annuaire (lèverait `AnnuaireAbsent` sur un lot déjà entamé), ni
-    la politique (ne change pas pendant un lot)."""
-    return (
-        frozenset(boitier.lister_utilisateurs()),
-        frozenset(boitier.lister_groupes()),
-    )
 
 
 def creer_annuaire(
@@ -220,6 +197,94 @@ def jamais_arrete() -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class Socle:
+    """Les quatre lectures fixes. C'est `groupes` qui dit combien d'autres suivront."""
+
+    domaine: str
+    plancher: PlancherPolitique
+    comptes: IndexBoitier
+    groupes: IndexBoitier
+
+
+def lire_socle(boitier: Boitier) -> Socle:
+    """Lecture seule, dans l'ordre du flux d'exécution de la spec, avec le traitement
+    des trois cas d'annuaire. Les adhésions se lisent ensuite, avec `lire_adhesions`."""
+    annuaires = boitier.lister_annuaires()
+    if not annuaires:
+        raise AnnuaireAbsent("le boîtier ne déclare aucun annuaire LDAP interne")
+    if len(annuaires) > 1:
+        raise AnnuairesMultiples(tuple(annuaires))
+    plancher = boitier.lire_politique()
+    return Socle(
+        domaine=annuaires[0],
+        plancher=plancher,
+        comptes=IndexBoitier.depuis(boitier.lister_utilisateurs()),
+        groupes=IndexBoitier.depuis(boitier.lister_groupes()),
+    )
+
+
+def lire_adhesions(
+    boitier: Boitier,
+    identites: Sequence[str],
+    *,
+    emettre: Emetteur,
+    arret_demande: ArretDemande = jamais_arrete,
+    apres_chaque: Callable[[], None] = _rien,
+) -> dict[str, tuple[str, ...]]:
+    """Un `USER GROUP SHOW` par groupe cité et reconnu, dans l'ordre reçu.
+
+    L'arrêt est consulté **entre deux lectures**, jamais au milieu de l'une d'elles : la
+    phase n'est plus l'affaire de quatre commandes, et un bouton *Arrêter* inerte
+    pendant qu'elle dure serait un bouton qui ment. Une lecture interrompue ne construit
+    aucun plan et n'écrit rien.
+    """
+    membres: dict[str, tuple[str, ...]] = {}
+    for identite in identites:
+        _verifier_arret(arret_demande)
+        try:
+            membres[cle(identite)] = tuple(boitier.lister_membres(identite))
+        except ErreurCommande as erreur:
+            # Un groupe sans membre peut rendre une section vide ou un refus : les deux
+            # se traitent comme « aucun membre connu ». Au pire des ADDUSER redondants
+            # partiront, que le boîtier absorbera ou refusera.
+            membres[cle(identite)] = ()
+            emettre(
+                Journal(
+                    f"groupe {identite} : membres illisibles ({erreur}) — ses adhésions "
+                    "seront toutes considérées comme manquantes"
+                )
+            )
+        apres_chaque()
+    return membres
+
+
+def relire_inventaire(
+    boitier: Boitier,
+    cites: Sequence[str],
+    emettre: Emetteur,
+    *,
+    arret_demande: ArretDemande = jamais_arrete,
+) -> tuple[IndexBoitier, IndexBoitier, dict[str, tuple[str, ...]]]:
+    """Reprise après reconnexion : comptes, groupes et **tout** l'inventaire des
+    adhésions. Ni l'annuaire (lèverait `AnnuaireAbsent` sur un lot déjà entamé), ni la
+    politique (ne change pas pendant un lot).
+
+    La demande d'arrêt traverse jusqu'à `lire_adhesions` : cette relecture est aussi
+    longue que la première — un `USER GROUP SHOW` par groupe cité —, et un bouton
+    *Arrêter* qui ne répondrait que sur l'un des deux chemins serait un bouton qui ment.
+    """
+    comptes = IndexBoitier.depuis(boitier.lister_utilisateurs())
+    groupes = IndexBoitier.depuis(boitier.lister_groupes())
+    membres = lire_adhesions(
+        boitier,
+        construction_plan.groupes_a_interroger(cites, groupes),
+        emettre=emettre,
+        arret_demande=arret_demande,
+    )
+    return comptes, groupes, membres
+
+
 class _ArretParLOperateur(Exception):
     """Interne : l'opérateur a cliqué sur *Arrêter*, l'unité de travail suivante n'est
     pas entamée.
@@ -244,10 +309,37 @@ class _Refuses:
     Un refus n'est pas une perte de liaison : la commande a été reçue et rejetée,
     la rejouer donnerait le même verdict. Le plan reconstruit après une reconnexion
     les écarte, sans quoi le rapport porterait deux fois le même échec.
+
+    **Tout entre et ressort par la clé de rapprochement**, jamais par la graphie reçue :
+    entre le refus et la replanification, c'est le boîtier qui décide sous quelle casse
+    il rend un compte ou un groupe, et une comparaison de chaînes brutes ferait dépendre
+    le sort d'une écriture de cette casse-là. D'où les accesseurs plutôt que l'accès
+    direct aux ensembles : la clé ne doit pas être à reposer à chaque point d'appel.
     """
 
     comptes: set[str] = field(default_factory=set)
     groupes: set[str] = field(default_factory=set)
+    # (clé du compte visé, clé du groupe visé) : un refus d'adhésion ne se rejoue pas
+    # plus qu'un refus de création.
+    adhesions: set[tuple[str, str]] = field(default_factory=set)
+
+    def refuser_compte(self, identifiant: str) -> None:
+        self.comptes.add(cle(identifiant))
+
+    def compte_refuse(self, identifiant: str) -> bool:
+        return cle(identifiant) in self.comptes
+
+    def refuser_groupe(self, nom: str) -> None:
+        self.groupes.add(cle(nom))
+
+    def groupe_refuse(self, nom: str) -> bool:
+        return cle(nom) in self.groupes
+
+    def refuser_adhesion(self, identifiant: str, groupe: str) -> None:
+        self.adhesions.add((cle(identifiant), cle(groupe)))
+
+    def adhesion_refusee(self, identifiant: str, groupe: str) -> bool:
+        return (cle(identifiant), cle(groupe)) in self.adhesions
 
 
 class _Compteur:
@@ -306,25 +398,44 @@ def executer(
                 )
             )
     try:
+        cites = construction_plan.groupes_cites(utilisateurs)
         boitier.connecter()
-        etat = lire_etat(boitier)
-        emettre(PolitiqueLue(etat.plancher))
+        socle = lire_socle(boitier)
+        emettre(PolitiqueLue(socle.plancher))
         # Le plancher qui fait foi est celui du boîtier que l'on vient de lire, jamais
         # celui qu'un lancement antérieur aurait laissé en mémoire : changer d'hôte
         # entre deux lots suffirait à écrire sous le plancher du nouveau.
-        manquements = tuple(motdepasse.violations(politique, etat.plancher))
+        manquements = tuple(motdepasse.violations(politique, socle.plancher))
         if manquements:
-            _arreter_politique(rapport, emettre, manquements, etat.plancher)
+            _arreter_politique(rapport, emettre, manquements, socle.plancher)
         else:
+            identites = construction_plan.groupes_a_interroger(cites, socle.groupes)
+            # Le nombre exact de lectures n'est connu qu'ici : USER GROUP LIST vient de
+            # dire lesquels des groupes cités existent déjà.
+            compteur.fixer_total(LECTURES_DE_BASE + len(identites))
+            for _ in range(LECTURES_DE_BASE):
+                compteur.avancer()
+            etat = EtatBoitier(
+                domaine=socle.domaine,
+                plancher=socle.plancher,
+                comptes=socle.comptes,
+                groupes=socle.groupes,
+                membres_par_groupe=lire_adhesions(
+                    boitier, identites, emettre=emettre,
+                    arret_demande=arret_demande, apres_chaque=compteur.avancer,
+                ),
+            )
             plan_courant = construction_plan.construire(utilisateurs, etat, rejets)
             # Figé ici : un plan reconstruit après reconnexion ne compte plus que le
             # reste, et le bilan d'un arrêt doit se dire contre ce qui était prévu.
-            rapport.comptes_prevus = len(plan_courant.comptes_a_creer)
-            compteur.fixer_total(
-                NOMBRE_LECTURES + (0 if simulation else plan_courant.nombre_operations())
-            )
-            for _ in range(NOMBRE_LECTURES):
-                compteur.avancer()
+            rapport.comptes_prevus = len(plan_courant.creations)
+            # Deux faits distincts : combien de comptes étaient prévus, et qu'il y ait
+            # eu un plan du tout. Un arrêt tombé plus haut n'a ni l'un ni l'autre.
+            rapport.plan_construit = True
+            # Figées ici pour la même raison : c'est l'état lu au moment où l'opérateur
+            # décide, et ces comptes-là ne recevront rien du lot.
+            rapport.nombre_comptes_ambigus = len(plan_courant.comptes_ambigus)
+            rapport.nombre_groupes_ambigus = len(plan_courant.groupes_ambigus)
             emettre(PlanPret(plan_courant))
             # Seul point d'arrêt d'une simulation, qui n'a rien à écrire ensuite ; en
             # lot réel il évite de poser une question sur un lot déjà arrêté.
@@ -334,12 +445,16 @@ def executer(
             if not simulation and not confirmer(plan_courant):
                 emettre(Journal(ABANDON_A_LA_CONFIRMATION))
             elif not simulation:
+                # Seule croissance admise du total, et elle suit immédiatement l'accord
+                # donné sur le nombre d'opérations lu dans la boîte de confirmation.
+                compteur.fixer_total(compteur.accomplies + plan_courant.nombre_operations())
                 _appliquer(
                     boitier,
                     utilisateurs,
                     etat,
                     plan_courant,
                     rejets,
+                    cites,
                     politique,
                     rapport,
                     compteur,
@@ -369,6 +484,7 @@ def _appliquer(
     etat: EtatBoitier,
     plan_courant: Plan,
     rejets: Sequence[Rejet],
+    cites: Sequence[str],
     politique: PolitiqueMotDePasse,
     rapport: Rapport,
     compteur: _Compteur,
@@ -386,7 +502,7 @@ def _appliquer(
         accomplies_avant = compteur.accomplies
         try:
             _creer_groupes(boitier, reste, rapport, compteur, emettre, refuses, arret_demande)
-            _creer_comptes(
+            _traiter_comptes(
                 boitier, reste, politique, rapport, compteur, emettre,
                 patience, generer_mot_de_passe, refuses, arret_demande,
             )
@@ -398,7 +514,10 @@ def _appliquer(
                 return
             # On ne rejoue jamais la commande interrompue : on relit et on replanifie.
             try:
-                reste = _replanifier(boitier, utilisateurs, etat, rejets, refuses)
+                reste = _replanifier(
+                    boitier, utilisateurs, etat, rejets, cites, refuses, emettre,
+                    arret_demande,
+                )
             except ErreurFatale:
                 # Classe fille d'ErreurBoitier : à intercepter avant elle, sinon
                 # cette clause ne serait jamais atteinte.
@@ -478,8 +597,36 @@ def _verifier_arret(arret_demande: ArretDemande) -> None:
 
 
 def _arreter_par_l_operateur(rapport: Rapport, emettre: Emetteur) -> None:
-    """Arrêt sur ordre : ni panne à attendre, ni erreur à corriger avant de relancer."""
+    """Arrêt sur ordre : ni panne à attendre, ni erreur à corriger avant de relancer.
+
+    Trois textes, parce que l'arrêt a désormais trois moments possibles. Avant le plan,
+    aucun compte n'était en cours : dire qu'il est allé à son terme serait faux, et
+    l'opérateur chercherait dans le journal un compte qui n'existe pas. Tant qu'aucune
+    création de compte n'a eu lieu — `rapport.comptes_crees` encore vide —, le dire serait
+    faux pour la même raison. Ce second cas ne se réduit pas à « avant la première
+    écriture » : une adhésion peut avoir été ajoutée avec succès sur un compte déjà
+    présent, sans qu'aucun compte n'ait été créé — le plan sans création est le seul
+    prédicat qui reste vrai sur ce chemin comme sur celui, plus fréquent, où rien n'a
+    encore été écrit.
+    """
     _marquer_arret(rapport, MotifArret.OPERATEUR)
+    if not rapport.plan_construit:
+        emettre(
+            Journal(
+                "arrêt demandé pendant la lecture de l'état du firewall : aucun plan "
+                "n'a été construit, aucun compte n'a été entamé, rien n'a été écrit. "
+                "Relancer est sans danger : le lot repartira de la première lecture."
+            )
+        )
+        return
+    if not rapport.comptes_crees:
+        emettre(
+            Journal(
+                "arrêt demandé : le plan a été établi mais aucun compte n'a encore été "
+                "créé. Relancer est sans danger : le lot repartira du plan déjà établi."
+            )
+        )
+        return
     emettre(
         Journal(
             "arrêt demandé : le compte en cours est allé à son terme, les suivants n'ont "
@@ -512,32 +659,49 @@ def _arreter_politique(
 
 
 def _replanifier(
-    boitier: Boitier, utilisateurs: Sequence[Utilisateur], etat: EtatBoitier,
-    rejets: Sequence[Rejet], refuses: _Refuses,
+    boitier: Boitier,
+    utilisateurs: Sequence[Utilisateur],
+    etat: EtatBoitier,
+    rejets: Sequence[Rejet],
+    cites: Sequence[str],
+    refuses: _Refuses,
+    emettre: Emetteur,
+    arret_demande: ArretDemande,
 ) -> Plan:
-    """Reprise en milieu de lot : seuls les comptes et les groupes sont relus.
+    """Reprise en milieu de lot : comptes, groupes et **tout** l'inventaire des adhésions.
 
-    L'annuaire et le plancher de politique du premier état sont conservés : ni l'un
-    ni l'autre ne change pendant un lot, et les relire ferait lever `AnnuaireAbsent`
-    sur un chemin que rien ne décrit.
+    L'annuaire et le plancher de politique du premier état sont conservés : ni l'un ni
+    l'autre ne change pendant un lot, et les relire ferait lever `AnnuaireAbsent` sur un
+    chemin que rien ne décrit.
     """
-    comptes, groupes = lire_comptes_et_groupes(boitier)
+    comptes, groupes, membres = relire_inventaire(
+        boitier, cites, emettre, arret_demande=arret_demande
+    )
     plan_reconstruit = construction_plan.construire(
-        utilisateurs, replace(etat, utilisateurs=comptes, groupes=groupes), rejets
+        utilisateurs,
+        replace(etat, comptes=comptes, groupes=groupes, membres_par_groupe=membres),
+        rejets,
     )
     # Ce que le boîtier a refusé ne repart pas : le refus est déjà au rapport, et le
     # rejouer le compterait une fois de plus sans rien créer.
     return replace(
         plan_reconstruit,
-        comptes_a_creer=tuple(
-            compte
-            for compte in plan_reconstruit.comptes_a_creer
-            if compte.identifiant not in refuses.comptes
+        travaux=tuple(
+            replace(
+                travail,
+                adhesions=tuple(
+                    groupe
+                    for groupe in travail.adhesions
+                    if not refuses.adhesion_refusee(travail.identifiant_cible, groupe)
+                ),
+            )
+            for travail in plan_reconstruit.travaux
+            if not refuses.compte_refuse(travail.identifiant_cible)
         ),
         groupes_a_creer=tuple(
             groupe
             for groupe in plan_reconstruit.groupes_a_creer
-            if groupe.nom not in refuses.groupes
+            if not refuses.groupe_refuse(groupe.nom)
         ),
     )
 
@@ -573,7 +737,7 @@ def _creer_groupes(
         try:
             boitier.creer_groupe(groupe.nom)
         except ErreurCommande as erreur:
-            refuses.groupes.add(groupe.nom)
+            refuses.refuser_groupe(groupe.nom)
             rapport.echecs.append(Echec(groupe.nom, "USER GROUP CREATE", str(erreur)))
             emettre(Journal(f"groupe {groupe.nom} : échec de création ({erreur})"))
         else:
@@ -582,75 +746,120 @@ def _creer_groupes(
         compteur.avancer()
 
 
-def _creer_comptes(
+def _traiter_comptes(
     boitier: Boitier, plan_courant: Plan, politique: PolitiqueMotDePasse,
     rapport: Rapport, compteur: _Compteur, emettre: Emetteur,
     patience: Patience, generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str],
     refuses: _Refuses, arret_demande: ArretDemande,
 ) -> None:
-    for utilisateur in plan_courant.comptes_a_creer:
+    """Une seule boucle sur les comptes : le point d'arrêt reste entre deux d'entre eux,
+    et le compte entamé va jusqu'à son terme, ses adhésions comprises."""
+    for travail in plan_courant.travaux:
         _verifier_arret(arret_demande)
-        try:
-            boitier.creer_utilisateur(
-                utilisateur.identifiant, utilisateur.nom, utilisateur.prenom,
-                plan_courant.domaine,
-            )
-        except ErreurCommande as erreur:
-            refuses.comptes.add(utilisateur.identifiant)
-            rapport.echecs.append(Echec(utilisateur.identifiant, "USER CREATE", str(erreur)))
-            emettre(Journal(f"{utilisateur.identifiant} : échec de création ({erreur})"))
-            # Aucun mot de passe n'a été généré : le secret n'est pas consommé.
-            # Le budget entier du compte est consommé : ni USER PASSWORD ni les
-            # USER GROUP ADDUSER n'auront lieu.
-            compteur.avancer(2 + len(utilisateur.groupes))
+        if travail.a_creer and not _creer_le_compte(
+            boitier, travail, plan_courant.domaine, politique, rapport, compteur,
+            emettre, patience, generer_mot_de_passe, refuses,
+        ):
             continue
-        compteur.avancer()
-        # Génération au moment de la création effective, jamais à la construction du plan.
-        secret = generer_mot_de_passe(politique)
-        # Le compte est inscrit au rapport dès sa création : le CSV de sortie est la
-        # liste de reprise de l'opérateur, et une coupure survenue après USER CREATE
-        # ne doit pas pouvoir effacer un compte qui existe bel et bien sur le boîtier.
-        rang = len(rapport.comptes_crees)
-        rapport.comptes_crees.append(CompteCree(utilisateur.identifiant, ""))
+        _ajouter_les_adhesions(boitier, travail, rapport, compteur, emettre, refuses)
+
+
+def _creer_le_compte(
+    boitier: Boitier, travail: TravailCompte, domaine: str,
+    politique: PolitiqueMotDePasse, rapport: Rapport, compteur: _Compteur,
+    emettre: Emetteur, patience: Patience,
+    generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str], refuses: _Refuses,
+) -> bool:
+    """Crée le compte puis pose son mot de passe. Rend faux si la création a échoué.
+
+    **Seul chemin d'appel de `_definir_mot_de_passe` du module.** Un compte déjà présent
+    ne traverse jamais cette fonction : c'est ainsi, et non par une règle qu'on se
+    rappelle, que son mot de passe reste hors d'atteinte. Le secret n'est généré qu'ici,
+    après une création réussie : un compte qui n'est pas créé n'en consomme aucun.
+    """
+    try:
+        boitier.creer_utilisateur(
+            travail.identifiant_cible, travail.utilisateur.nom,
+            travail.utilisateur.prenom, domaine,
+        )
+    except ErreurCommande as erreur:
+        refuses.refuser_compte(travail.identifiant_cible)
+        rapport.echecs.append(Echec(travail.identifiant_cible, "USER CREATE", str(erreur)))
+        emettre(Journal(f"{travail.identifiant_cible} : échec de création ({erreur})"))
+        if travail.adhesions:
+            # En v1, un refus emportait les adhésions en silence et c'était juste : sans
+            # création, pas d'adhésion. En v2 un refus « existe déjà » prouve au
+            # contraire que le compte est là, donc que ses adhésions sont du travail
+            # légitime. Les tenter quand même est une décision de conception qui n'est
+            # pas prise ici ; les taire, en revanche, laissait l'opérateur sans rien
+            # pour les reprendre — le rapport ne comptait qu'un échec, celui de la
+            # création.
+            emettre(
+                Journal(
+                    f"{travail.identifiant_cible} : adhésions non tentées, le compte "
+                    f"n'ayant pas été créé — {', '.join(travail.adhesions)}"
+                )
+            )
+        # Budget entier du compte : ni USER PASSWORD ni les ADDUSER n'auront lieu.
+        compteur.avancer(2 + len(travail.adhesions))
+        return False
+    compteur.avancer()
+    secret = generer_mot_de_passe(politique)
+    # Inscrit dès la création : le CSV de sortie est la liste de reprise de l'opérateur,
+    # et une coupure survenue après USER CREATE ne doit pas effacer un compte qui existe.
+    rang = len(rapport.comptes_crees)
+    rapport.comptes_crees.append(CompteCree(travail.identifiant_cible, ""))
+    try:
+        retenu = _definir_mot_de_passe(
+            boitier, travail.identifiant_cible, secret, rapport, emettre, patience
+        )
+    except ErreurReseau:
+        _signaler_interruption(
+            rapport, emettre, travail.identifiant_cible, "USER PASSWORD",
+            "coupure réseau après la création : compte créé sans mot de passe "
+            "utilisable, à reprendre à la main",
+        )
+        emettre(CreationReussie(rapport.comptes_crees[rang]))
+        raise
+    compteur.avancer()
+    compte = CompteCree(travail.identifiant_cible, retenu)
+    rapport.comptes_crees[rang] = compte
+    emettre(Journal(f"{travail.identifiant_cible} : créé"))
+    emettre(CreationReussie(compte))
+    return True
+
+
+def _ajouter_les_adhesions(
+    boitier: Boitier, travail: TravailCompte, rapport: Rapport,
+    compteur: _Compteur, emettre: Emetteur, refuses: _Refuses,
+) -> None:
+    """Un ADDUSER refusé est signalé et le lot continue : une adhésion manquante ne rend
+    pas un compte inutilisable, et aucun réessai dédié n'est prévu."""
+    for rang, groupe in enumerate(travail.adhesions):
         try:
-            retenu = _definir_mot_de_passe(
-                boitier, utilisateur.identifiant, secret, rapport, emettre, patience
+            boitier.ajouter_membre(groupe, travail.identifiant_cible)
+        except ErreurCommande as erreur:
+            # Mémorisé comme un refus de création : le plan reconstruit après une
+            # reconnexion ne le rejoue pas, sans quoi le rapport porterait deux fois le
+            # même échec.
+            refuses.refuser_adhesion(travail.identifiant_cible, groupe)
+            rapport.echecs.append(
+                Echec(travail.identifiant_cible, "USER GROUP ADDUSER", str(erreur))
+            )
+            emettre(
+                Journal(f"{travail.identifiant_cible} : non rattaché à {groupe} ({erreur})")
             )
         except ErreurReseau:
+            # Contrairement à la v1, la relecture qui suit la reconnexion replanifiera
+            # ces adhésions : elle relit les membres de chaque groupe cité.
+            restants = ", ".join(travail.adhesions[rang:])
             _signaler_interruption(
-                rapport, emettre, utilisateur.identifiant, "USER PASSWORD",
-                "coupure réseau après la création : compte créé sans mot de passe "
-                "utilisable, à reprendre à la main",
+                rapport, emettre, travail.identifiant_cible, "USER GROUP ADDUSER",
+                f"coupure réseau pendant le rattachement : groupes non rattachés "
+                f"({restants}), ils seront replanifiés après reconnexion",
             )
-            emettre(CreationReussie(rapport.comptes_crees[rang]))
             raise
         compteur.avancer()
-        compte = CompteCree(utilisateur.identifiant, retenu)
-        rapport.comptes_crees[rang] = compte
-        emettre(Journal(f"{utilisateur.identifiant} : créé"))
-        emettre(CreationReussie(compte))
-        for rang_groupe, groupe in enumerate(utilisateur.groupes):
-            try:
-                boitier.ajouter_membre(groupe, utilisateur.identifiant)
-            except ErreurCommande as erreur:
-                rapport.echecs.append(
-                    Echec(utilisateur.identifiant, "USER GROUP ADDUSER", str(erreur))
-                )
-                emettre(
-                    Journal(f"{utilisateur.identifiant} : non rattaché à {groupe} ({erreur})")
-                )
-            except ErreurReseau:
-                # Le plan reconstruit ne rattrapera pas ces rattachements : il ne
-                # calcule d'ADDUSER que pour les comptes à créer, et celui-ci vient
-                # de basculer dans les comptes déjà présents.
-                restants = ", ".join(utilisateur.groupes[rang_groupe:])
-                _signaler_interruption(
-                    rapport, emettre, utilisateur.identifiant, "USER GROUP ADDUSER",
-                    f"coupure réseau pendant le rattachement : groupes non rattachés "
-                    f"({restants}), à reprendre à la main",
-                )
-                raise
-            compteur.avancer()
 
 
 def _signaler_interruption(

@@ -386,8 +386,9 @@ class Fenetre:
     def _confirmer_la_perte_des_secrets(self) -> bool:
         """Dernier rempart avant qu'un nouveau lot efface les mots de passe du précédent.
 
-        Les comptes existent déjà sur le boîtier : un relancement les classera « déjà
-        présent, ignoré » et ne leur redonnera jamais de mot de passe.
+        Les comptes existent déjà sur le boîtier : un relancement les verra comme déjà
+        présents, ne leur redonnera plus que leurs adhésions manquantes, et jamais de
+        mot de passe.
         """
         en_attente = self.enregistrables.secrets_en_attente
         if not en_attente:
@@ -439,12 +440,13 @@ class Fenetre:
         Aucune confirmation : qui clique est déjà pressé, et relancer ne coûte rien
         puisque l'outil est idempotent. Le bouton reste actif jusqu'au bilan — un second
         clic pose une demande déjà posée, ce qui ne change rien. Le fil d'exécution
-        répond quand le compte en cours est allé à son terme, et c'est le journal du
-        métier qui le dit.
+        répond quand l'opération en cours est allée à son terme — une lecture de
+        l'inventaire ou un compte entamé —, et c'est le journal du métier qui le dit.
 
         La ligne de journal part d'ici et non du fil : elle accuse réception du geste,
-        pendant que le fil continue son compte. Un second clic la réécrit, ce qui est
-        encore une réponse.
+        pendant que le fil achève ce qu'il avait commencé. Elle ne sait pas dans quelle
+        phase le clic tombe, et ne promet donc aucun compte en cours. Un second clic la
+        réécrit, ce qui est encore une réponse.
         """
         self._ecrire(ARRET_DEMANDE_AU_CLIC)
         self.arret.demander()

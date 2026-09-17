@@ -2,10 +2,13 @@
 
 from collections.abc import Callable, Sequence
 
+from fabriques import _Interrupteur
+
 from stormshield_utilisateurs import motdepasse
 from stormshield_utilisateurs.boitier import ErreurCommande, ErreurFatale, ErreurReseau
-from stormshield_utilisateurs.boitier_memoire import BoitierMemoire
+from stormshield_utilisateurs.boitier_memoire import BoitierMemoire, dn_de
 from stormshield_utilisateurs.execution import (
+    LECTURES_DE_BASE,
     CreationReussie,
     Evenement,
     Journal,
@@ -47,23 +50,6 @@ def _utilisateur(identifiant: str, *groupes: str, ligne: int = 2) -> Utilisateur
     )
 
 
-class _Interrupteur:
-    """Le bouton *Arrêter* de la fenêtre, réduit à ce que le métier en voit.
-
-    En production c'est un `threading.Event` posé depuis le fil de l'interface ; ici le
-    test le bascule lui-même, au moment exact qu'il veut éprouver.
-    """
-
-    def __init__(self, *, demande: bool = False) -> None:
-        self.demande = demande
-
-    def demander(self) -> None:
-        self.demande = True
-
-    def __call__(self) -> bool:
-        return self.demande
-
-
 def _lancer(
     boitier: BoitierMemoire,
     utilisateurs: list[Utilisateur],
@@ -97,6 +83,10 @@ def _ecritures(boitier: BoitierMemoire) -> list[str]:
         if operation
         in {"creer_groupe", "creer_utilisateur", "definir_mot_de_passe", "ajouter_membre"}
     ]
+
+
+def _rattachements(boitier: BoitierMemoire) -> list[str]:
+    return [cible for operation, cible in boitier.journal_appels if operation == "ajouter_membre"]
 
 
 def _progressions(evenements: list[Evenement]) -> list[Progression]:
@@ -134,7 +124,7 @@ def test_un_lot_reel_demande_confirmation_sur_le_plan_avant_toute_ecriture() -> 
         return True
 
     _lancer(boitier, [_utilisateur("dupont", "compta_bis")], confirmer=accorder)
-    assert [compte.identifiant for compte in vus[0].comptes_a_creer] == ["dupont"]
+    assert [travail.identifiant_cible for travail in vus[0].creations] == ["dupont"]
     assert [(groupe.nom, groupe.nombre_membres) for groupe in vus[0].groupes_a_creer] == [
         ("compta_bis", 1)
     ]
@@ -176,11 +166,12 @@ def test_simulation_lit_mais_n_ecrit_pas() -> None:
         "lire_politique",
         "lister_utilisateurs",
         "lister_groupes",
+        "lister_membres",
     }
     assert rapport.comptes_crees == []
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
-    assert [compte.identifiant for compte in plans[0].plan.comptes_a_creer] == ["dupont"]
-    assert plans[0].plan.orphelins == ("martin",)
+    assert [travail.identifiant_cible for travail in plans[0].plan.creations] == ["dupont"]
+    assert plans[0].plan.nombre_orphelins == 1
 
 
 def test_aucun_mot_de_passe_genere_en_simulation() -> None:
@@ -193,6 +184,55 @@ def test_aucun_mot_de_passe_genere_en_simulation() -> None:
 
     _lancer(BoitierMemoire(), [_utilisateur("dupont")], simulation=True, generer=generer)
     assert appels == []
+
+
+def test_aucun_mot_de_passe_n_est_pose_sur_un_compte_deja_present() -> None:
+    """La garantie que le nouveau périmètre met le plus à l'épreuve : l'outil écrit
+    désormais sur des comptes existants."""
+    boitier = BoitierMemoire(utilisateurs=["Jean.Dupont", "legrand"], groupes=["rh"])
+    _lancer(
+        boitier,
+        [_utilisateur("jean.dupont", "rh"), _utilisateur("legrand", ligne=3)],
+        simulation=False,
+    )
+    assert "definir_mot_de_passe" not in [operation for operation, _ in boitier.journal_appels]
+    assert boitier.mots_de_passe == {}
+
+
+def test_un_compte_ambigu_ne_recoit_rien_et_le_lot_continue() -> None:
+    """Ni création, ni adhésion, ni mot de passe — et les autres comptes du lot passent :
+    un boîtier mal rangé ne prive pas les deux cents autres."""
+    boitier = BoitierMemoire(
+        utilisateurs=["Jean.Dupont", "JEAN.DUPONT"], groupes=["rh"]
+    )
+    _lancer(
+        boitier,
+        [_utilisateur("jean.dupont", "rh"), _utilisateur("legrand", ligne=3)],
+        simulation=False,
+    )
+    assert boitier.membres.get("rh", []) == []
+    assert boitier.mots_de_passe.keys() == {"legrand"}
+    assert sorted(boitier.utilisateurs) == ["JEAN.DUPONT", "Jean.Dupont", "legrand"]
+
+
+def test_le_rapport_porte_le_nombre_de_comptes_et_de_groupes_ambigus() -> None:
+    """Les ambiguïtés n'atteignaient jamais le rapport : le bilan final disait « 0 échec »
+    pendant qu'un compte du fichier n'avait rien reçu. Elles sont figées sur le plan
+    construit, comme les comptes prévus : c'est l'état lu au moment où l'opérateur a
+    décidé."""
+    boitier = BoitierMemoire(
+        utilisateurs=["Jean.Dupont", "JEAN.DUPONT"], groupes=["Rh", "RH"]
+    )
+    rapport, _ = _lancer(
+        boitier,
+        [_utilisateur("jean.dupont", "rh"), _utilisateur("legrand", "rh", ligne=3)],
+    )
+    assert (rapport.nombre_comptes_ambigus, rapport.nombre_groupes_ambigus) == (1, 1)
+
+
+def test_un_lot_sans_ambiguite_n_en_compte_aucune() -> None:
+    rapport, _ = _lancer(BoitierMemoire(), [_utilisateur("dupont", "compta")])
+    assert (rapport.nombre_comptes_ambigus, rapport.nombre_groupes_ambigus) == (0, 0)
 
 
 def test_aucun_mot_de_passe_genere_quand_la_creation_echoue() -> None:
@@ -213,6 +253,41 @@ def test_aucun_mot_de_passe_genere_quand_la_creation_echoue() -> None:
     assert appels == []
     assert rapport.comptes_crees == []
     assert rapport.echecs[0].operation == "USER CREATE"
+
+
+def test_un_refus_de_creation_nomme_au_journal_les_adhesions_non_tentees() -> None:
+    """En v1 un refus emportait les adhésions en silence, et c'était juste : sans
+    création, pas d'adhésion. En v2 un refus « existe déjà » prouve au contraire que le
+    compte est là, donc que ses adhésions sont du travail légitime — et rien ne disait
+    lesquelles n'avaient pas été tentées. Le rapport annonçait « 1 échec » et le journal
+    ne parlait que de la création : les deux adhésions écartées n'apparaissaient nulle
+    part, et l'opérateur n'avait pas de quoi les reprendre."""
+    boitier = BoitierMemoire(groupes=["compta", "rh"], membres={"compta": [], "rh": []})
+
+    def refuser_b(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "b":
+            raise ErreurCommande(200, "l'utilisateur b existe déjà")
+
+    boitier.declencheur = refuser_b
+    _, evenements = _lancer(boitier, [_utilisateur("b", "compta", "rh")])
+    assert (
+        "b : adhésions non tentées, le compte n'ayant pas été créé — compta, rh"
+        in _textes(evenements)
+    )
+
+
+def test_un_refus_de_creation_sans_adhesion_ne_parle_pas_d_adhesions() -> None:
+    """La ligne ne doit pas s'écrire pour rien : le cas le plus fréquent d'un premier lot
+    est le CSV sans colonne de groupes."""
+    boitier = BoitierMemoire()
+
+    def refuser(operation: str, _cible: str) -> None:
+        if operation == "creer_utilisateur":
+            raise ErreurCommande(200, "uid interdit")
+
+    boitier.declencheur = refuser
+    _, evenements = _lancer(boitier, [_utilisateur("admin")])
+    assert not any("adhésions non tentées" in texte for texte in _textes(evenements))
 
 
 def test_echec_isole_n_arrete_pas_le_lot() -> None:
@@ -343,10 +418,11 @@ def test_reconnexion_reconstruit_le_plan_au_lieu_de_rejouer() -> None:
     assert rapport.interrompu is False
     # Le plan reconstruit range legrand en « déjà présent ».
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
-    assert [compte.identifiant for compte in plans[-1].plan.comptes_ignores] == [
-        "dupont",
-        "legrand",
-    ]
+    assert [
+        travail.identifiant_cible
+        for travail in plans[-1].plan.travaux
+        if not travail.a_creer
+    ] == ["dupont", "legrand"]
     # La barre reste cohérente : le total suit le plan reconstruit.
     derniere = _progressions(evenements)[-1]
     assert derniere.accomplies == derniere.total
@@ -364,7 +440,7 @@ def test_executer_transmet_les_rejets_a_la_construction_du_plan() -> None:
         rejets=[Rejet(ligne=3, identifiant="martin", motif="prenom vide")],
     )
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
-    assert plans[0].plan.orphelins == ()
+    assert plans[0].plan.nombre_orphelins == 0
 
 
 def test_la_reconstruction_du_plan_apres_reconnexion_transmet_aussi_les_rejets() -> None:
@@ -388,7 +464,7 @@ def test_la_reconstruction_du_plan_apres_reconnexion_transmet_aussi_les_rejets()
     )
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
     assert len(plans) == 2  # le plan reconstruit après la coupure, pas le premier
-    assert plans[-1].plan.orphelins == ()
+    assert plans[-1].plan.nombre_orphelins == 0
 
 
 def test_coupure_entre_la_creation_et_le_mot_de_passe_laisse_une_trace() -> None:
@@ -422,8 +498,9 @@ def test_coupure_entre_la_creation_et_le_mot_de_passe_laisse_une_trace() -> None
 
 
 def test_coupure_pendant_le_rattachement_laisse_une_trace() -> None:
-    """Le plan reconstruit ne rattrape pas un compte devenu « déjà présent » :
-    l'interruption doit laisser un échec exploitable."""
+    """L'adhésion est replanifiée après reconnexion ; si la coupure se répète, le
+    garde-fou des tours sans progrès ferme la boucle. L'interruption doit laisser un
+    échec exploitable, et le lot s'achève sur un arrêt réseau."""
     boitier = BoitierMemoire(groupes=["compta"])
 
     def couper_le_rattachement(operation: str, cible: str) -> None:
@@ -438,6 +515,10 @@ def test_coupure_pendant_le_rattachement_laisse_une_trace() -> None:
         echec.identifiant == "dupont" and echec.operation == "USER GROUP ADDUSER"
         for echec in rapport.echecs
     )
+    # Sans cette ligne, l'inversion du comportement — la v1 finissait proprement, la v2
+    # replanifie l'adhésion et bute deux fois sur la même coupure — ne serait prouvée
+    # nulle part, et le test continuerait de passer en disant le contraire.
+    assert rapport.motif_arret is MotifArret.RESEAU
 
 
 def test_la_reprise_ne_relit_que_les_comptes_et_les_groupes() -> None:
@@ -491,6 +572,98 @@ def test_un_compte_refuse_n_est_pas_rejoue_apres_une_reconnexion() -> None:
               if operation == "creer_utilisateur"]
     assert appels.count("admin") == 1
     assert [echec.identifiant for echec in rapport.echecs] == ["admin"]
+
+
+def _lot_ou_un_compte_refuse_reapparait(graphie_relue: str) -> BoitierMemoire:
+    """`USER CREATE` refusé sur `jean.dupont`, coupure, puis relecture où le boîtier rend
+    ce compte sous `graphie_relue`.
+
+    Un refus « existe déjà » est le cas le plus fréquent de la v2 : le compte est bel et
+    bien là, et c'est le boîtier qui décide sous quelle casse il le rend.
+    """
+    boitier = BoitierMemoire(groupes=["compta"], membres={"compta": []})
+    coupures: list[str] = []
+
+    def refuser_jean_puis_couper(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "jean.dupont":
+            raise ErreurCommande(200, "l'utilisateur jean.dupont existe déjà")
+        if operation == "creer_utilisateur" and cible == "legrand" and not coupures:
+            coupures.append(cible)
+            boitier.utilisateurs.append(graphie_relue)
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = refuser_jean_puis_couper
+    _lancer(boitier, [_utilisateur("jean.dupont", "compta"), _utilisateur("legrand", ligne=3)])
+    return boitier
+
+
+def test_le_sort_d_un_compte_refuse_ne_depend_pas_de_la_graphie_relue() -> None:
+    """Un refus se retient sous la clé de rapprochement, jamais sous la graphie reçue.
+
+    Sur la graphie identique, le plan reconstruit écarte le travail et ses adhésions ne
+    partent jamais ; sur une graphie de casse différente, la comparaison de chaînes
+    brutes échoue et les mêmes adhésions partent. Le sort d'une écriture dépendrait alors
+    de la casse que le boîtier choisit de rendre — dans la branche dont tout le sujet est
+    l'insensibilité à la casse.
+    """
+    rendu_tel_quel = _lot_ou_un_compte_refuse_reapparait("jean.dupont")
+    rendu_sous_une_autre_casse = _lot_ou_un_compte_refuse_reapparait("Jean.Dupont")
+    assert _rattachements(rendu_tel_quel) == _rattachements(rendu_sous_une_autre_casse) == []
+
+
+def test_une_adhesion_refusee_ne_se_rejoue_pas_sous_une_autre_graphie() -> None:
+    """Même règle pour un `USER GROUP ADDUSER` refusé : sa clé peut changer de casse
+    entre deux plans, et le rapport porterait sinon deux fois le même échec — ce que la
+    spec v1 interdit au paragraphe « Échec isolé »."""
+    boitier = BoitierMemoire(
+        utilisateurs=["jean.dupont"], groupes=["compta"], membres={"compta": []}
+    )
+    coupures: list[str] = []
+
+    def refuser_compta_puis_couper(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible.startswith("compta/"):
+            raise ErreurCommande(200, "groupe compta inconnu")
+        if operation == "creer_utilisateur" and cible == "legrand" and not coupures:
+            coupures.append(cible)
+            # Même compte, autre graphie rendue par la relecture.
+            boitier.utilisateurs[0] = "Jean.Dupont"
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = refuser_compta_puis_couper
+    rapport, _ = _lancer(
+        boitier, [_utilisateur("jean.dupont", "compta"), _utilisateur("legrand", ligne=3)]
+    )
+    refus = [echec for echec in rapport.echecs if echec.operation == "USER GROUP ADDUSER"]
+    assert len(refus) == 1
+    assert _rattachements(boitier) == ["compta/jean.dupont"]
+
+
+def test_une_adhesion_refusee_ne_se_rejoue_pas_quand_le_groupe_a_une_casse_mixte() -> None:
+    """Les deux tests de ce registre partent d'un boîtier tout en minuscules : le refus
+    y est donc enregistré sous une graphie déjà normalisée, et un registre qui rangerait
+    la graphie brute au lieu de la clé de rapprochement passerait inaperçu. Ici la toute
+    première lecture rend déjà une casse mixte — `Jean.Dupont` dans `Compta` — pour
+    pincer le côté écriture. La casse du *groupe* suffit à casser la symétrie, même si
+    les deux lectures rendent ensuite la même graphie du compte."""
+    boitier = BoitierMemoire(
+        utilisateurs=["Jean.Dupont"], groupes=["Compta"], membres={"Compta": []}
+    )
+    coupures: list[str] = []
+
+    def refuser_compta_puis_couper(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible.startswith("Compta/"):
+            raise ErreurCommande(200, "groupe compta inconnu")
+        if operation == "creer_utilisateur" and cible == "legrand" and not coupures:
+            coupures.append(cible)
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = refuser_compta_puis_couper
+    rapport, _ = _lancer(
+        boitier, [_utilisateur("jean.dupont", "compta"), _utilisateur("legrand", ligne=3)]
+    )
+    refus = [echec for echec in rapport.echecs if echec.operation == "USER GROUP ADDUSER"]
+    assert len(refus) == 1
+    assert _rattachements(boitier) == ["Compta/Jean.Dupont"]
 
 
 def test_un_groupe_refuse_n_est_pas_rejoue_apres_une_reconnexion() -> None:
@@ -583,7 +756,129 @@ def test_reprise_les_comptes_deja_crees_sont_ignores() -> None:
     rapport, evenements = _lancer(boitier, [_utilisateur("dupont"), _utilisateur("legrand")])
     assert [compte.identifiant for compte in rapport.comptes_crees] == ["legrand"]
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
-    assert [compte.identifiant for compte in plans[0].plan.comptes_ignores] == ["dupont"]
+    assert [
+        travail.identifiant_cible for travail in plans[0].plan.travaux if not travail.a_creer
+    ] == ["dupont"]
+
+
+def test_une_adhesion_deja_posee_n_est_pas_reposee_apres_une_reconnexion() -> None:
+    """L'inventaire relu après la coupure doit **servir** : le lire puis le jeter ferait
+    reposer les adhésions déjà passées — membres dupliqués sur le boîtier — et ferait
+    croître le total une seconde fois, après la confirmation.
+
+    `test_la_relecture_apres_reconnexion_reconstruit_tout_l_inventaire` éprouve
+    `relire_inventaire` en direct et ne reconnecte jamais : le câblage de son résultat
+    dans le plan reconstruit n'est prouvé qu'ici.
+    """
+    boitier = BoitierMemoire(utilisateurs=["alpha"], groupes=["g1", "g2"])
+    coupures: list[str] = []
+
+    def couper_apres_le_premier_rattachement(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible == "g2/alpha" and not coupures:
+            coupures.append(cible)
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_apres_le_premier_rattachement
+    rapport, evenements = _lancer(boitier, [_utilisateur("alpha", "g1", "g2")])
+    assert boitier.connexions == 2
+    # g1 était posé avant la coupure : le plan reconstruit ne le replanifie pas.
+    assert boitier.journal_appels.count(("ajouter_membre", "g1/alpha")) == 1
+    assert boitier.membres["g1"] == [dn_de("alpha")]
+    assert boitier.membres["g2"] == [dn_de("alpha")]
+    assert rapport.interrompu is False
+    totaux = [progression.total for progression in _progressions(evenements)]
+    # Le total ne croît qu'à la confirmation ; une adhésion replanifiée à tort le ferait
+    # monter une seconde fois, après elle.
+    budget = max(totaux)
+    assert totaux[totaux.index(budget) :] == sorted(totaux[totaux.index(budget) :], reverse=True)
+
+
+def test_l_arret_est_honore_pendant_la_relecture_qui_suit_une_reconnexion() -> None:
+    """La relecture de reprise est aussi longue que la première — un USER GROUP SHOW par
+    groupe cité. Un bouton *Arrêter* qui ne répondrait que sur l'un des deux chemins
+    serait un bouton qui ment."""
+    boitier = BoitierMemoire(groupes=["g1", "g2", "g3"])
+    interrupteur = _Interrupteur()
+
+    def couper_puis_cliquer_pendant_la_relecture(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and boitier.connexions == 1:
+            raise ErreurReseau("liaison perdue")
+        if operation == "lister_membres" and cible == "g1" and boitier.connexions == 2:
+            interrupteur.demander()
+
+    boitier.declencheur = couper_puis_cliquer_pendant_la_relecture
+    rapport, _ = _lancer(
+        boitier, [_utilisateur("alpha", "g1", "g2", "g3")], arret=interrupteur
+    )
+    lectures = [
+        cible for operation, cible in boitier.journal_appels if operation == "lister_membres"
+    ]
+    # Les trois du premier tour, puis la seule du second : g2 et g3 ne sont pas entamés.
+    assert lectures == ["g1", "g2", "g3", "g1"]
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+
+
+def test_rejouer_le_meme_fichier_n_emet_aucune_ecriture() -> None:
+    """Zéro commande d'écriture, pas « des commandes sans effet »."""
+    boitier = BoitierMemoire()
+    utilisateurs = [_utilisateur("dupont", "compta"), _utilisateur("legrand", ligne=3)]
+    _lancer(boitier, utilisateurs, simulation=False)
+    boitier.journal_appels.clear()
+    rapport, _ = _lancer(boitier, utilisateurs, simulation=False)
+    assert _ecritures(boitier) == []
+    assert rapport.comptes_crees == []
+
+
+def test_l_idempotence_survit_a_une_difference_de_casse() -> None:
+    boitier = BoitierMemoire(utilisateurs=["Jean.Dupont"], groupes=["Compta"])
+    boitier.ajouter_membre("Compta", "Jean.Dupont")
+    boitier.journal_appels.clear()
+    _lancer(boitier, [_utilisateur("jean.dupont", "compta")], simulation=False)
+    assert _ecritures(boitier) == []
+
+
+def test_un_rattachement_illisible_fait_repartir_les_memes_adhesions() -> None:
+    """Dégradation honnête : l'outil ne promet pas une idempotence que l'hypothèse sur
+    le DN ne garantit pas — il promet qu'un rattachement raté coûte des commandes
+    redondantes et jamais un dommage."""
+    boitier = BoitierMemoire(
+        utilisateurs=["dupont"],
+        groupes=["compta"],
+        membres={"compta": ("cn=forme-inattendue,dc=local",)},
+    )
+    _, evenements = _lancer(boitier, [_utilisateur("dupont", "compta")], simulation=False)
+    assert ("ajouter_membre", "compta/dupont") in boitier.journal_appels
+    (plan,) = [message.plan for message in evenements if isinstance(message, PlanPret)]
+    assert plan.nombre_membres_non_rattaches == 1
+
+
+def test_une_adhesion_refusee_ne_se_rejoue_pas_apres_reconnexion() -> None:
+    """Le rapport porterait sinon deux fois le même refus.
+
+    Le compte existe déjà : `compta` est refusé par le boîtier, puis la coupure survient
+    sur `rh`. Le plan reconstruit après reconnexion replanifie `rh` — l'inventaire relu
+    dit que l'adhésion manque — mais pas `compta`, que le boîtier a explicitement refusé.
+    """
+    boitier = BoitierMemoire(utilisateurs=["legrand"], groupes=["rh"])
+    coupures: list[str] = []
+
+    def saboter(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible == "compta/legrand":
+            raise ErreurCommande(200, "groupe compta inconnu")
+        if operation == "ajouter_membre" and cible == "rh/legrand" and not coupures:
+            coupures.append(cible)
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = saboter
+    rapport, _ = _lancer(
+        boitier, [_utilisateur("legrand", "compta", "rh")], simulation=False
+    )
+    # Une seule tentative sur compta : c'est là qu'est la preuve du non-rejeu.
+    assert boitier.journal_appels.count(("ajouter_membre", "compta/legrand")) == 1
+    refus = [echec for echec in rapport.echecs if "groupe compta inconnu" in echec.motif]
+    assert len(refus) == 1
+    assert refus[0].operation == "USER GROUP ADDUSER"
+    assert boitier.membres["rh"] == [dn_de("legrand")]
 
 
 def test_progression_en_simulation_couvre_les_seules_lectures() -> None:
@@ -611,8 +906,9 @@ def test_progression_atteint_le_total_quand_une_creation_echoue() -> None:
         boitier,
         [_utilisateur("dupont", "compta", "rh"), _utilisateur("legrand", ligne=3)],
     )
-    # 4 lectures + (USER CREATE + USER PASSWORD + 2 ADDUSER) + (USER CREATE + USER PASSWORD)
-    assert _progressions(evenements)[-1] == Progression(accomplies=10, total=10)
+    # 4 + 2 lectures + (USER CREATE + USER PASSWORD + 2 ADDUSER)
+    # + (USER CREATE + USER PASSWORD)
+    assert _progressions(evenements)[-1] == Progression(accomplies=12, total=12)
 
 
 def test_arret_definitif_gele_la_barre_sous_son_total() -> None:
@@ -635,9 +931,11 @@ def test_arret_definitif_gele_la_barre_sous_son_total() -> None:
     assert _progressions(evenements)[-1] == Progression(accomplies=5, total=8)
 
 
-def test_le_total_ne_croit_jamais_apres_un_recalcul() -> None:
-    """Contrat de fin de lot : un recalcul après reconnexion ne peut que faire
-    décroître le total, jamais le faire monter — la barre ne recule pas."""
+def test_un_recalcul_apres_reconnexion_ne_peut_que_faire_baisser_le_total() -> None:
+    """Moitié de l'invariant v1 qui survit. Le total croît une fois, à la confirmation
+    (`test_le_total_ne_croit_qu_une_fois_l_ecriture_confirmee`) ; passé cet instant, un
+    plan reconstruit ne compte plus que le reste et la barre suit à la baisse, plutôt que
+    de viser un total qu'aucune opération restante ne peut plus atteindre."""
     boitier = BoitierMemoire()
 
     def couper_apres_le_premier(operation: str, cible: str) -> None:
@@ -648,8 +946,22 @@ def test_le_total_ne_croit_jamais_apres_un_recalcul() -> None:
     boitier.declencheur = couper_apres_le_premier
     _, evenements = _lancer(boitier, [_utilisateur("dupont"), _utilisateur("legrand", ligne=3)])
     totaux = [progression.total for progression in _progressions(evenements)]
-    assert totaux == sorted(totaux, reverse=True)
-    assert totaux[-1] < totaux[0]
+    budget = max(totaux)
+    apres_la_confirmation = totaux[totaux.index(budget) :]
+    assert apres_la_confirmation == sorted(apres_la_confirmation, reverse=True)
+    assert totaux[-1] < budget
+
+
+def test_le_total_ne_croit_qu_une_fois_l_ecriture_confirmee() -> None:
+    """L'amendement de l'invariant v1 « le total ne croît jamais » survit, réduit à ce
+    seul moment : juste après que l'opérateur a lu le nombre d'opérations qu'il autorise."""
+    boitier = BoitierMemoire(groupes=["compta"])
+    _, evenements = _lancer(boitier, [_utilisateur("dupont", "compta")], simulation=False)
+    totaux = [progression.total for progression in _progressions(evenements)]
+    (plan,) = [message.plan for message in evenements if isinstance(message, PlanPret)]
+    assert totaux[0] == LECTURES_DE_BASE + 1  # le seul groupe cité existe déjà
+    assert totaux[-1] == totaux[0] + plan.nombre_operations()
+    assert totaux == sorted(totaux)
 
 
 def test_une_politique_sous_le_plancher_arrete_avant_toute_ecriture() -> None:
@@ -795,7 +1107,7 @@ def test_le_compte_en_cours_va_jusqu_au_bout_et_le_suivant_n_est_pas_entame() ->
     )
     assert boitier.utilisateurs == ["dupont"]
     assert boitier.mots_de_passe == {"dupont": "MotDePasse1!"}
-    assert boitier.membres == {"compta": ["dupont"]}
+    assert boitier.membres == {"compta": [dn_de("dupont")]}
     assert rapport.interrompu is True
     assert rapport.motif_arret is MotifArret.OPERATEUR
 
@@ -876,8 +1188,9 @@ def test_un_arret_demande_avant_la_premiere_ecriture_ne_pose_pas_la_confirmation
 
 
 def test_la_barre_gele_sous_son_total_sur_un_arret_demande() -> None:
-    """Contrat de progression : la barre ne ment pas en s'achevant, et son total ne
-    croît jamais. C'est `rapport.interrompu` qui dit si le lot est allé au bout."""
+    """Contrat de progression : la barre ne ment pas en s'achevant. Son total ne croît
+    qu'une fois, à la confirmation de l'écriture — jamais après, et jamais sur un arrêt.
+    C'est `rapport.interrompu` qui dit si le lot est allé au bout."""
     boitier = BoitierMemoire()
     interrupteur = _Interrupteur()
 
@@ -905,6 +1218,99 @@ def test_l_arret_demande_laisse_une_ligne_de_journal() -> None:
         boitier, [_utilisateur("dupont")], arret=_Interrupteur(demande=True)
     )
     assert any("arrêt demandé" in texte for texte in _textes(evenements))
+
+
+def test_l_arret_pendant_l_inventaire_ne_construit_aucun_plan() -> None:
+    """Une lecture interrompue ne construit aucun plan et n'écrit rien ; son bilan est
+    celui d'un arrêt demandé à zéro compte créé, et son journal ne parle d'aucun compte
+    mené à son terme — il n'y en avait pas."""
+    boitier = BoitierMemoire(groupes=["compta", "rh"])
+    interrupteur = _Interrupteur()
+
+    def arreter_apres_la_premiere_lecture(operation: str, cible: str) -> None:
+        if operation == "lister_membres" and cible == "compta":
+            interrupteur.demander()
+
+    boitier.declencheur = arreter_apres_la_premiere_lecture
+    rapport, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont", "compta", "rh")],
+        simulation=False,
+        arret=interrupteur,
+    )
+    assert ("lister_membres", "rh") not in boitier.journal_appels
+    assert not [message for message in evenements if isinstance(message, PlanPret)]
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+    assert rapport.comptes_crees == []
+    assert _ecritures(boitier) == []
+    (ligne,) = [texte for texte in _textes(evenements) if texte.startswith("arrêt demandé")]
+    assert "aucun plan n'a été construit" in ligne
+    assert "le compte en cours" not in ligne
+
+
+def test_l_arret_juste_apres_le_plan_ne_pretend_pas_qu_un_compte_est_alle_a_son_terme() -> None:
+    """Seul point d'arrêt qu'une simulation atteint, et atteignable en lot réel avant la
+    confirmation : le plan existe, mais aucun compte n'a encore été créé. Le journal ne
+    doit pas prétendre qu'un compte en cours est allé à son terme — il n'y en avait pas."""
+    boitier = BoitierMemoire()
+    rapport, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont")],
+        simulation=True,
+        arret=_Interrupteur(demande=True),
+    )
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+    assert rapport.comptes_crees == []
+    assert _ecritures(boitier) == []
+    (ligne,) = [texte for texte in _textes(evenements) if texte.startswith("arrêt demandé")]
+    assert "le compte en cours" not in ligne
+
+
+def test_l_arret_apres_une_adhesion_sur_un_compte_existant_ne_pretend_pas_de_creation() -> None:
+    """Une écriture a bien eu lieu — l'ADDUSER sur dupont, déjà présent — sans qu'aucun
+    compte n'ait été créé : le second message reste celui qui s'applique, et non « avant
+    la première écriture », prédicat que ce chemin met en défaut."""
+    boitier = BoitierMemoire(utilisateurs=["dupont"], groupes=["compta"])
+    interrupteur = _Interrupteur()
+
+    def arreter_apres_l_adhesion_de_dupont(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible == "compta/dupont":
+            interrupteur.demander()
+
+    boitier.declencheur = arreter_apres_l_adhesion_de_dupont
+    rapport, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont", "compta"), _utilisateur("martin")],
+        arret=interrupteur,
+    )
+    assert boitier.membres["compta"] == [dn_de("dupont")]
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+    assert rapport.comptes_crees == []
+    (ligne,) = [texte for texte in _textes(evenements) if texte.startswith("arrêt demandé")]
+    assert "aucun compte n'a encore été créé" in ligne
+    assert "le compte en cours" not in ligne
+
+
+def test_l_arret_apres_un_compte_cree_dit_qu_il_est_alle_a_son_terme() -> None:
+    """Pendant du test précédent : ce troisième message n'était couvert par aucun test —
+    seule son absence l'était, dans les deux autres cas."""
+    boitier = BoitierMemoire()
+    interrupteur = _Interrupteur()
+
+    def arreter_apres_la_creation_de_dupont(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "dupont":
+            interrupteur.demander()
+
+    boitier.declencheur = arreter_apres_la_creation_de_dupont
+    rapport, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont"), _utilisateur("martin")],
+        arret=interrupteur,
+    )
+    assert rapport.comptes_crees != []
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+    (ligne,) = [texte for texte in _textes(evenements) if texte.startswith("arrêt demandé")]
+    assert "le compte en cours est allé à son terme" in ligne
 
 
 def test_sans_demande_d_arret_le_lot_va_jusqu_au_bout() -> None:

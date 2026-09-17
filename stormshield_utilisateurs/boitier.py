@@ -41,7 +41,7 @@ class Boitier(Protocol):
     def initialiser_annuaire(
         self, domainname: str, organisation: str, dc: str, mot_de_passe: str
     ) -> None:
-        """CONFIG LDAP INITIALIZE. Chemin conditionnel : voir execution.lire_etat."""
+        """CONFIG LDAP INITIALIZE. Chemin conditionnel : voir execution.lire_socle."""
         ...
 
     def activer_annuaire(self) -> None: ...
@@ -63,3 +63,7 @@ class Boitier(Protocol):
     def definir_mot_de_passe(self, identifiant: str, mot_de_passe: str) -> None: ...
 
     def ajouter_membre(self, groupe: str, identifiant: str) -> None: ...
+
+    def lister_membres(self, groupe: str) -> list[str]:
+        """USER GROUP SHOW : les DN des membres du groupe, tels que le boîtier les rend."""
+        ...
