@@ -5,7 +5,7 @@ import string
 import pytest
 
 from stormshield_utilisateurs.modele import PlancherPolitique, PolitiqueMotDePasse
-from stormshield_utilisateurs.motdepasse import generer, proposer, violations
+from stormshield_utilisateurs.motdepasse import SPECIAUX, generer, proposer, violations
 
 TOUTES_CLASSES = PolitiqueMotDePasse(
     longueur=16, minuscules=True, majuscules=True, chiffres=True, speciaux=True
@@ -147,6 +147,15 @@ def test_proposition_respecte_le_plancher_et_reste_genereuse() -> None:
     assert propose.longueur == 24
     assert violations(propose, plancher) == []
     assert proposer(PlancherPolitique(8, 2, 0)).longueur == 16
+
+
+def test_le_jeu_de_speciaux_exclut_le_guillemet_et_l_espace() -> None:
+    """`boitier_sdk.definir_mot_de_passe` envoie `password={mot_de_passe}` nu, sans
+    guillemets, dans la commande USER PASSWORD. Un guillemet ou une espace dans un mot
+    de passe généré découperait silencieusement cette commande côté boîtier : c'est la
+    seule chose qui protège ce point, elle doit être verrouillée par un test."""
+    assert '"' not in SPECIAUX
+    assert " " not in SPECIAUX
 
 
 def test_la_proposition_active_les_quatre_classes() -> None:
