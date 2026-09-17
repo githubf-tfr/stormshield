@@ -60,6 +60,7 @@ from stormshield_utilisateurs.presentation import (
     BoiteParLot,
     ComptesEnregistrables,
     Connexion,
+    DemandeArret,
     DemandeConfirmation,
     Echoue,
     IncidentInterface,
@@ -70,6 +71,7 @@ from stormshield_utilisateurs.presentation import (
     Publieur,
     avertissement_de_fermeture,
     avertissement_perte_de_secrets,
+    etat_des_boutons,
     libelle_plancher,
     ligne_d_enregistrement,
     ligne_de_message_inconnu,
@@ -133,6 +135,10 @@ class Fenetre:
         # Vrai entre le démarrage d'un fil de lot et son message terminal : c'est ce
         # que l'opérateur perdrait en fermant la fenêtre.
         self.lot_en_cours = False
+        # Ordre d'arrêt du lot en cours. Remplacé à chaque démarrage : une demande ne
+        # se retire pas, et celle d'un lot fini n'a pas à arrêter le suivant. Celle-ci
+        # ne sert jamais — *Arrêter* est grisé tant qu'aucun lot n'a démarré.
+        self.arret = DemandeArret()
         # Vrai entre le démarrage du fil de création d'annuaire et son message terminal.
         # Attribut de la fenêtre et non fermeture du dialogue : le garde de fermeture de
         # la fenêtre principale doit le connaître, `CONFIG LDAP INITIALIZE` étant
@@ -245,6 +251,11 @@ class Fenetre:
 
         self.bouton_lancer = ttk.Button(cadre, text="Lancer", command=self._au_lancement)
         self.bouton_lancer.grid(row=10, column=0, sticky="w", padx=6, pady=3)
+        # À côté de *Lancer*, jamais à sa place : l'opérateur doit voir d'un coup d'œil
+        # dans quel état est l'outil, et lequel des deux gestes lui est offert.
+        self.bouton_arreter = ttk.Button(cadre, text="Arrêter", command=self._a_l_arret)
+        self.bouton_arreter.grid(row=10, column=1, sticky="w", padx=6, pady=3)
+        self._appliquer_etat_des_boutons()
 
         journal = ttk.Frame(cadre)
         journal.grid(row=11, column=0, columnspan=3, sticky="nsew", padx=6, pady=3)
@@ -358,12 +369,13 @@ class Fenetre:
         # qui suivra ne réécrira pas ce qu'il a durci.
         if self.plancher is not None:
             self.politique = politique
+        # L'état des boutons ne se règle qu'au démarrage effectif du fil : tout ce qui
+        # précède peut encore rendre la main sans qu'aucun lot ne parte.
         # Le journal n'est jamais vidé : il n'a aucun autre exemplaire, et l'effacer
         # emporterait la liste des comptes à reprendre du lot précédent. Cette ligne
         # dit où le nouveau lot commence.
         self._ecrire(ligne_de_nouveau_lot(simulation=parametres.simulation))
         self._ecrire_lignes(lignes_du_fichier(utilisateurs, rejets))
-        self.bouton_lancer.configure(state=tk.DISABLED)
         self._demarrer(parametres, utilisateurs, rejets)
 
     def _confirmer_la_perte_des_secrets(self) -> bool:
@@ -396,18 +408,41 @@ class Fenetre:
         # Le lot qui commence a droit à sa boîte : le silence ne valait que pour le
         # précédent.
         self.boite_incident.reinitialiser()
-        # Variable locale : rien de `self` ne doit voyager jusqu'au fil.
+        # Variables locales : rien de `self` ne doit voyager jusqu'au fil. `arret` est
+        # un `threading.Event` enveloppé, sans le moindre widget : c'est le seul objet
+        # que les deux fils partagent, et il ne circule que dans ce sens.
         file: queue.Queue[MessageFil] = queue.Queue()
+        arret = DemandeArret()
+        self.arret = arret
         fil = threading.Thread(
             target=travailler,
             # `rejets` voyage jusqu'au fil : le plan en a besoin pour ne pas annoncer
             # orphelin un compte dont la ligne a seulement été rejetée.
-            args=(parametres, utilisateurs, file.put, rejets),
+            args=(parametres, utilisateurs, file.put, rejets, arret),
             daemon=True,
         )
         self.lot_en_cours = True
+        self._appliquer_etat_des_boutons()
         fil.start()
         self._pomper(file, self._appliquer)
+
+    def _a_l_arret(self) -> None:
+        """Clic sur *Arrêter*, dans le fil de l'interface. Ne bloque rien, n'attend rien.
+
+        Aucune confirmation : qui clique est déjà pressé, et relancer ne coûte rien
+        puisque l'outil est idempotent. Le bouton reste actif jusqu'au bilan — un second
+        clic pose une demande déjà posée, ce qui ne change rien. Le fil d'exécution
+        répond quand le compte en cours est allé à son terme, et c'est le journal du
+        métier qui le dit.
+        """
+        self.arret.demander()
+
+    def _appliquer_etat_des_boutons(self) -> None:
+        """*Lancer* et *Arrêter* ne sont jamais actifs ensemble. La règle vit dans
+        `presentation`, qui se teste ; ici il ne reste que la traduction en état Tk."""
+        etat = etat_des_boutons(lot_en_cours=self.lot_en_cours)
+        self.bouton_lancer.configure(state=tk.NORMAL if etat.lancer else tk.DISABLED)
+        self.bouton_arreter.configure(state=tk.NORMAL if etat.arreter else tk.DISABLED)
 
     def _pomper(self, file: "queue.Queue[MessageFil]", appliquer: Publieur) -> None:
         PompeEvenements(file, appliquer, self._planifier, self._signaler_incident).tour()
@@ -417,8 +452,10 @@ class Fenetre:
         self.racine.after(delai_ms, rappel)
 
     def _reactiver_lancement(self) -> None:
+        """Sur le message terminal du lot, et seulement là : *Lancer* redevient actif,
+        *Arrêter* n'a plus rien à arrêter."""
         self.lot_en_cours = False
-        self.bouton_lancer.configure(state=tk.NORMAL)
+        self._appliquer_etat_des_boutons()
 
     # --- anomalies internes ----------------------------------------------
 
