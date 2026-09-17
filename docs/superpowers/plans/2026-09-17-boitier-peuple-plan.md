@@ -67,13 +67,13 @@ Elles s'appliquent à **toutes** les tâches, sans être répétées dans chacun
 | Fichier | Nature du changement |
 |---|---|
 | `stormshield_utilisateurs/rapprochement.py` | **créé** — clé `casefold`, index des graphies du boîtier, extraction de l'`uid` d'un DN |
-| `stormshield_utilisateurs/modele.py` | `EtatBoitier` réécrit, `Plan` réécrit, `TravailCompte`, `GroupeAmbigu` et `CompteAmbigu` ajoutés |
+| `stormshield_utilisateurs/modele.py` | `EtatBoitier` réécrit, `Plan` réécrit, `TravailCompte`, `GroupeAmbigu` et `CompteAmbigu` ajoutés (**T4**) ; `Rapport` gagne `plan_construit` (**T5**) |
 | `stormshield_utilisateurs/plan.py` | `construire` réécrit, `groupes_cites` et `groupes_a_interroger` ajoutés |
 | `stormshield_utilisateurs/boitier.py` | une opération de plus au `Protocol` : `lister_membres` (**T3**, en même temps que l'implémentation SDK — voir « Ordre et parallélisme ») ; le renvoi à `execution.lire_etat` de la ligne 44 corrigé en T5 |
 | `stormshield_utilisateurs/boitier_memoire.py` | rend des **DN**, accepte des membres non rattachables, `lister_membres` |
 | `stormshield_utilisateurs/boitier_sdk.py` | `USER GROUP SHOW`, lecture des champs `member=`, `member_2=`, … ; le renvoi à `lire_etat` de la ligne 199 corrigé en T5 |
-| `stormshield_utilisateurs/execution.py` | lecture `4 + g`, arrêt entre deux lectures, **une seule** boucle d'écriture, mot de passe structurellement inatteignable pour un compte existant, refus d'adhésion mémorisés |
-| `stormshield_utilisateurs/presentation.py` | rendu du plan par compte, orphelins comptés, membres non rattachés annoncés, ambiguïtés de casse — groupes et comptes — signalées, confirmation enrichie, « déjà présent, ignoré » purgé, docstring de `reglage_barre` (l. 422) corrigée |
+| `stormshield_utilisateurs/execution.py` | lecture `4 + g`, arrêt entre deux lectures, **une seule** boucle d'écriture, mot de passe structurellement inatteignable pour un compte existant, refus d'adhésion mémorisés, journal de l'arrêt dédoublé (un arrêt avant le plan n'a interrompu aucun compte) |
+| `stormshield_utilisateurs/presentation.py` | rendu du plan par compte, orphelins comptés, membres non rattachés annoncés, ambiguïtés de casse — groupes et comptes — signalées, confirmation enrichie, « déjà présent, ignoré » purgé, docstring de `reglage_barre` (l. 422) corrigée, bilan d'un arrêt tombé avant le plan |
 | `stormshield_utilisateurs/fenetre.py` | **une seule docstring** à corriger (celle de `_confirmer_la_perte_des_secrets`, l. 387-391, la formule courant sur 389-390) — aucun changement de câblage : la fenêtre ne touche le plan que par `lignes_du_plan` |
 | `README.md`, `docs/recette/2026-09-16-cahier-recette-v1.md`, `KANBAN.md` | mis à jour (tâches 8 à 10) |
 
@@ -84,9 +84,9 @@ Tests existants qui **doivent** changer, et pourquoi :
 | `tests/test_plan.py` | réécrit : `EtatBoitier` et `Plan` changent de forme, et toute la décision change de contenu |
 | `tests/test_modele.py` | `test_nombre_d_operations_du_plan` : le plan ne porte plus `comptes_a_creer`/`comptes_ignores` |
 | `tests/test_boitier_memoire.py` | `boitier.membres["compta"]` contient désormais des DN, pas des identifiants |
-| `tests/test_execution_ecriture.py` | 3 familles : les assertions sur `boitier.membres` (ligne 798 ; la 435 reste vraie), les totaux de `Progression` (la lecture ne vaut plus 4 mais `4 + g`, et le total croît une fois), et l'accès aux champs du plan émis par `PlanPret` |
+| `tests/test_execution_ecriture.py` | 3 familles : les assertions sur `boitier.membres` (ligne 798 ; la 435 reste vraie), les totaux de `Progression` (la lecture ne vaut plus 4 mais `4 + g`, et le total croît une fois), et l'accès aux champs du plan émis par `PlanPret` ; plus une docstring devenue fausse sans que le test tombe (l. 878-880, jumelle de `reglage_barre`) |
 | `tests/test_execution_lecture.py` | **en T4** : `etat.utilisateurs`/`etat.groupes` deviennent des `IndexBoitier` ; **en T5** : `lire_etat` se scinde, `lire_comptes_et_groupes` disparaît au profit de `relire_inventaire`, le nombre d'opérations de lecture n'est plus fixe |
-| `tests/test_presentation.py` | `lignes_du_plan`, `texte_de_confirmation_du_lot`, le helper `_plan` et ses six appelants, `plan.orphelins` (l. 866) et les textes qui disent « déjà présent, ignoré » |
+| `tests/test_presentation.py` | `lignes_du_plan`, `texte_de_confirmation_du_lot`, le helper `_plan` et ses six appelants, `plan.orphelins` (l. 866), les textes qui disent « déjà présent, ignoré », et les cinq `Rapport` de la section « arrêt demandé » qui gagnent `plan_construit=True` |
 | `tests/test_boitier_sdk.py` | la commande `USER GROUP SHOW` et sa lecture, plus une trace des commandes envoyées sur `_ClientFactice` (T3, étape 1) |
 | `tests/fabriques.py` | reçoit `_Interrupteur`, déplacé depuis `tests/test_execution_ecriture.py` pour être partagé avec `tests/test_execution_lecture.py` (T5) |
 | `tests/test_lecture.py`, `tests/test_motdepasse.py`, `tests/test_sortie.py` | **inchangés** : la v2 ne touche ni le contrat du CSV, ni la génération des secrets, ni le CSV de sortie |
@@ -1668,9 +1668,26 @@ perdre de sa précision.
 | `test_execution_ecriture.py::test_reconnexion_reconstruit_le_plan_au_lieu_de_rejouer` (l. 346) | lit `comptes_ignores` | `[travail.identifiant_cible for travail in plans[-1].plan.travaux if not travail.a_creer]` : la même preuve — après reconnexion, les deux comptes sont vus comme présents |
 | `test_execution_ecriture.py::test_executer_transmet_les_rejets_a_la_construction_du_plan` (l. 367) | lit `plan.orphelins` | `plans[0].plan.nombre_orphelins == 0` |
 | `test_execution_ecriture.py::test_la_reconstruction_du_plan_apres_reconnexion_transmet_aussi_les_rejets` (l. 391) | lit `plan.orphelins` | `plans[-1].plan.nombre_orphelins == 0` |
-| `test_execution_ecriture.py::test_reprise_les_comptes_deja_crees_sont_ignores` (l. 586) | lit `comptes_ignores` | `[travail.identifiant_cible for travail in plans[0].plan.travaux if not travail.a_creer] == ["dupont"]` |
+| `test_execution_ecriture.py::test_reprise_les_comptes_deja_crees_sont_ignores` (l. 586) | lit `comptes_ignores` | la même compréhension que ci-dessus, comparée à `["dupont"]` — **à replier sur quatre lignes**, voir l'extrait sous le tableau : transcrite d'un trait elle fait 112 caractères et `ruff` la refuse (`line-length = 100`) |
 | `test_execution_lecture.py::test_un_annuaire_est_le_cas_nominal` (l. 21-22) | `etat.utilisateurs` / `etat.groupes` ne sont plus des `frozenset` | `etat.comptes.graphies == ("martin",)` et `etat.groupes.graphies == ("rh",)` — l'index conserve l'ordre rendu, l'assertion y gagne en précision |
 | `test_execution_lecture.py::test_reprise_ne_relit_que_les_comptes_et_les_groupes` (l. 116-118) | `lire_comptes_et_groupes` rend deux index | `utilisateurs.graphies == ("martin",)`, `groupes.graphies == ("rh",)` ; l'assertion sur les deux seules opérations lues ne bouge pas (le test disparaît en T5, remplacé par celui de `relire_inventaire`) |
+
+Deux détails que le tableau ne peut pas porter, et que le cadre du tableau rend faciles à
+manquer — l'un coûte un `ruff` rouge, l'autre un `NameError` :
+
+```python
+# test_reprise_les_comptes_deja_crees_sont_ignores : repliée, 100 caractères au plus.
+    assert [
+        travail.identifiant_cible
+        for travail in plans[0].plan.travaux
+        if not travail.a_creer
+    ] == ["dupont"]
+```
+
+- **Importer `TravailCompte` dans `tests/test_modele.py` et dans `tests/test_presentation.py`**
+  (depuis `stormshield_utilisateurs.modele`), en plus de `presentation.py` : les tests réécrits
+  ci-dessus le construisent des deux côtés, et il n'y est aujourd'hui dans ni l'un ni l'autre.
+  Sans ces imports, `NameError` à l'exécution.
 
 Pour les trois tests de `lignes_du_plan` et le helper `_plan`, le rendu attendu en fin de T4
 — il n'y a rien à deviner, et T6 le remplacera par un rendu plus complet :
@@ -1784,8 +1801,11 @@ git commit -m "feat: un travail par compte, reconnaissance insensible à la cass
 **Fichiers :**
 - Modifier : `stormshield_utilisateurs/execution.py:30-31` (la constante), `:70-98`
   (`lire_etat` et `lire_comptes_et_groupes` **supprimées**), `:298-363` (`executer`),
-  `:366-432` (`_appliquer`), `:514-542` (`_replanifier`), et ajout de `Socle`, `lire_socle`,
-  `lire_adhesions`, `relire_inventaire`
+  `:366-432` (`_appliquer`), `:480-489` (`_arreter_par_l_operateur`), `:514-542`
+  (`_replanifier`), et ajout de `Socle`, `lire_socle`, `lire_adhesions`,
+  `relire_inventaire`
+- Modifier : `stormshield_utilisateurs/modele.py:120-132` (`Rapport`) — **un champ de
+  plus**, `plan_construit`, exigé par le point d'arrêt neuf (étape 4)
 - Modifier : `stormshield_utilisateurs/boitier.py:44` et
   `stormshield_utilisateurs/boitier_sdk.py:199` — deux docstrings renvoient à
   `execution.lire_etat`, qui disparaît ici ; écrire `execution.lire_socle`
@@ -1803,6 +1823,7 @@ git commit -m "feat: un travail par compte, reconnaissance insensible à la cass
   apres_chaque=_rien) -> dict[str, tuple[str, ...]]` ;
   `relire_inventaire(boitier, cites, emettre) -> tuple[IndexBoitier, IndexBoitier,
   dict[str, tuple[str, ...]]]`. `lire_comptes_et_groupes` **disparaît**.
+- Produit aussi : `Rapport.plan_construit: bool = False`, lu par `presentation.py` en T6.
 
 C'est cette tâche qui rend l'outil idempotent : jusqu'ici l'inventaire des adhésions était
 vide et les `ADDUSER` repartaient à chaque exécution.
@@ -2009,7 +2030,7 @@ Corriger au passage les deux docstrings qui renvoient à la fonction supprimée 
 garde. Une référence orpheline dans un commentaire coûte, plus tard, une lecture de code pour
 rien.
 
-- [ ] **Étape 4 : câbler `executer`**
+- [ ] **Étape 4 : câbler `executer`, et rendre vrai le journal de l'arrêt**
 
 Dans le corps de `executer`, remplacer le bloc de lecture et de total :
 
@@ -2040,6 +2061,9 @@ Dans le corps de `executer`, remplacer le bloc de lecture et de total :
             )
             plan_courant = construction_plan.construire(utilisateurs, etat, rejets)
             rapport.comptes_prevus = len(plan_courant.creations)
+            # Deux faits distincts : combien de comptes étaient prévus, et qu'il y ait
+            # eu un plan du tout. Un arrêt tombé plus haut n'a ni l'un ni l'autre.
+            rapport.plan_construit = True
             emettre(PlanPret(plan_courant))
             _verifier_arret(arret_demande)
             if not simulation and not confirmer(plan_courant):
@@ -2114,6 +2138,60 @@ Et son unique site d'appel, dans `_appliquer` :
                     boitier, utilisateurs, etat, rejets, cites, refuses, emettre
                 )
 ```
+
+**Le journal de l'arrêt, rendu vrai sur le chemin neuf.** Jusqu'ici l'arrêt demandé ne pouvait
+tomber qu'après la construction du plan : le journal pouvait donc affirmer sans risque qu'un
+compte était allé à son terme. Le point d'arrêt posé dans `lire_adhesions` ouvre un second
+chemin, où **aucun compte n'était en cours** et où **rien n'a été planifié** — la phrase
+devient un mensonge mesurable, et l'opérateur chercherait dans le journal un compte qui
+n'existe pas. Le rapport doit donc porter le fait qui distingue les deux chemins. Dans
+`modele.py`, sous `comptes_prevus` :
+
+```python
+    # Faux tant que la phase de lecture n'a pas abouti à un plan. `comptes_prevus` vaut
+    # alors zéro faute d'avoir été compté, et non parce que rien n'était à créer : sans
+    # cette distinction, un arrêt tombé pendant la lecture se raconterait comme un lot
+    # dont le plan ne prévoyait aucune création.
+    plan_construit: bool = False
+```
+
+Puis `_arreter_par_l_operateur` (`execution.py:480`) gagne une branche, et rien d'autre : le
+texte de la v1 reste mot pour mot sur le chemin de la v1 :
+
+```python
+def _arreter_par_l_operateur(rapport: Rapport, emettre: Emetteur) -> None:
+    """Arrêt sur ordre : ni panne à attendre, ni erreur à corriger avant de relancer.
+
+    Deux textes, parce que l'arrêt a désormais deux moments possibles. Avant le plan,
+    aucun compte n'était en cours : dire qu'il est allé à son terme serait faux, et
+    l'opérateur chercherait dans le journal un compte qui n'existe pas.
+    """
+    _marquer_arret(rapport, MotifArret.OPERATEUR)
+    if not rapport.plan_construit:
+        emettre(
+            Journal(
+                "arrêt demandé pendant la lecture de l'état du firewall : aucun plan "
+                "n'a été construit, aucun compte n'a été entamé, rien n'a été écrit. "
+                "Relancer est sans danger : le lot repartira de la première lecture."
+            )
+        )
+        return
+    emettre(
+        Journal(
+            "arrêt demandé : le compte en cours est allé à son terme, les suivants n'ont "
+            "pas été entamés. Relancer est sans danger : les comptes créés seront vus "
+            "comme déjà présents."
+        )
+    )
+```
+
+Les deux textes commencent par « arrêt demandé » : `test_l_arret_demande_laisse_une_ligne_de_journal`
+(l. 900) n'en cherche pas davantage et reste vert sans retouche, quel que soit le chemin pris.
+Le **bilan** rendu par `presentation.py` porte le même mensonge sur ce chemin (« Aucun compte
+ne restait à créer. » alors que le CSV en portait) : il se corrige en **T6, étape 3**, avec le
+reste de la présentation. Vérifié en exécutant : la branche de `_arreter_par_l_operateur` seule
+ne casse aucun test existant ; c'est celle de `presentation.py` qui en casse quatre, et T6 les
+reprend.
 
 - [ ] **Étape 5 : écrire les tests d'idempotence et de reprise**
 
@@ -2200,7 +2278,8 @@ Ajouter enfin, pour l'arrêt pendant la lecture — de bout en bout, sans rien d
 ```python
 def test_l_arret_pendant_l_inventaire_ne_construit_aucun_plan() -> None:
     """Une lecture interrompue ne construit aucun plan et n'écrit rien ; son bilan est
-    celui d'un arrêt demandé à zéro compte créé."""
+    celui d'un arrêt demandé à zéro compte créé, et son journal ne parle d'aucun compte
+    mené à son terme — il n'y en avait pas."""
     boitier = BoitierMemoire(groupes=["compta", "rh"])
     interrupteur = _Interrupteur()
 
@@ -2218,9 +2297,19 @@ def test_l_arret_pendant_l_inventaire_ne_construit_aucun_plan() -> None:
     assert ("lister_membres", "rh") not in boitier.journal_appels
     assert not [message for message in evenements if isinstance(message, PlanPret)]
     assert rapport.motif_arret is MotifArret.OPERATEUR
-    assert rapport.comptes_prevus == 0
+    assert rapport.comptes_crees == []
     assert _ecritures(boitier) == []
+    (ligne,) = [texte for texte in _textes(evenements) if texte.startswith("arrêt demandé")]
+    assert "aucun plan n'a été construit" in ligne
+    assert "le compte en cours" not in ligne
 ```
+
+**Ne pas écrire `assert rapport.comptes_prevus == 0`** : c'est vrai, mais c'est vrai *faute
+d'avoir compté*, et une assertion qui fige cette valeur verrouille le bilan mensonger qu'elle
+produisait avant la correction. Ce que ce test doit verrouiller, c'est le texte : il n'y a pas
+eu de compte en cours, et le journal ne doit pas en inventer un. `_textes` est déjà défini dans
+le fichier (l. 106) ; la décomposition `(ligne,) = …` vaut assertion d'unicité — deux lignes
+« arrêt demandé » ou aucune font échouer le test.
 
 - [ ] **Étape 6 : corriger les totaux de progression rendus faux**
 
@@ -2288,6 +2377,19 @@ en nombres nus : un changement de la part fixe de la lecture doit faire bouger c
 laisser vert par accident. Exécuté, il donne `[5, 5, 5, 5, 5, 5, 8, 8, 8, 8]`. Importer
 `LECTURES_DE_BASE` depuis `execution`.
 
+Un sixième test **ne tombe pas**, mais sa docstring devient fausse — et c'est le jumeau exact
+de celle de `reglage_barre` que T6 corrige (`presentation.py:422`) : ne pas corriger l'une
+après avoir corrigé l'autre laisserait dans la suite la phrase que le produit vient de
+démentir. `test_la_barre_gele_sous_son_total_sur_un_arret_demande` (l. 878-880) affirme
+« son total ne **croît jamais** ». Ses assertions restent exactes et ne bougent pas ; seule la
+docstring change :
+
+```python
+    """Contrat de progression : la barre ne ment pas en s'achevant. Son total ne croît
+    qu'une fois, à la confirmation de l'écriture — jamais après, et jamais sur un arrêt.
+    C'est `rapport.interrompu` qui dit si le lot est allé au bout."""
+```
+
 Un dernier test à retoucher, qui passe mais pour une mauvaise raison :
 `test_simulation_lit_mais_n_ecrit_pas` (l. 172) compare le journal à un sur-ensemble
 (`operations <= {…}`) qui ne contient pas `lister_membres` ; il ne survit que parce que ce
@@ -2315,12 +2417,14 @@ git commit -m "feat: lecture d'état à 4 + g commandes, adhésions relues, idem
 **Fichiers :**
 - Modifier : `stormshield_utilisateurs/presentation.py:422` (docstring de `reglage_barre`),
   `:471-482` (docstring), `:541-554` (`avertissement_perte_de_secrets`), `:569-584`
-  (`lignes_du_plan`), `:591-630` (`texte_de_confirmation_du_lot`)
+  (`lignes_du_plan`), `:591-630` (`texte_de_confirmation_du_lot`), `:668-699`
+  (`_lignes_d_un_arret_demande`)
 - Modifier : `stormshield_utilisateurs/fenetre.py:387-391` (docstring seulement)
 - Modifier : `tests/test_presentation.py`
 
 **Interfaces :**
-- Consomme : `Plan` v2, `TravailCompte`, `GroupeAmbigu`, `CompteAmbigu` (T4).
+- Consomme : `Plan` v2, `TravailCompte`, `GroupeAmbigu`, `CompteAmbigu` (T4),
+  `Rapport.plan_construit` (T5).
 - Produit : rien de nouveau pour les autres modules ; `lignes_du_plan` et
   `texte_de_confirmation_du_lot` changent de contenu, pas de signature.
 
@@ -2443,7 +2547,33 @@ def test_une_seule_adhesion_s_annonce_au_singulier() -> None:
 def test_l_avertissement_de_perte_ne_parle_plus_de_compte_ignore() -> None:
     """Un compte déjà présent n'est plus « ignoré » : il peut recevoir des adhésions."""
     assert "ignoré" not in avertissement_perte_de_secrets(2)
+
+
+def test_le_bilan_d_un_arret_pendant_la_lecture_ne_dit_rien_du_reste_a_creer() -> None:
+    """Le plan n'était pas construit : rien n'avait été compté, donc rien ne peut être
+    dit de ce qui restait à créer. « Aucun compte ne restait à créer » se lirait comme
+    « le fichier n'apportait rien », et le CSV en portait."""
+    rapport = Rapport(interrompu=True, motif_arret=MotifArret.OPERATEUR)
+    assert lignes_du_rapport(rapport)[:4] == [
+        "Arrêt demandé.",
+        "Le lot s'est arrêté pendant la lecture de l'état du firewall : aucun plan "
+        "n'a été construit.",
+        "Rien n'a été écrit sur le firewall.",
+        "Relancez quand vous voulez : le lot repartira de la première lecture.",
+    ]
 ```
+
+Ce dernier test est le pendant, côté bilan, de
+`test_l_arret_pendant_l_inventaire_ne_construit_aucun_plan` (T5) : le point d'arrêt neuf de la
+lecture d'inventaire rend un `Rapport` sans plan, que la v1 ne pouvait pas produire. Les
+**cinq** `Rapport(…)` de la section « arrêt demandé par l'opérateur » du fichier — celles que
+rend `grep -n "motif_arret=MotifArret.OPERATEUR," tests/test_presentation.py` : l. 915, 931,
+947, 963 et 976 avant T4 — décrivent, eux, des lots arrêtés **après** la construction du
+plan : leur ajouter `plan_construit=True`, sans quoi quatre d'entre eux tombent sur le nouveau
+rendu. Mesuré : ce sont exactement ces quatre-là — `…compte_les_crees_et_les_non_touches`,
+`…s_accorde_au_singulier`, `…ne_promet_rien_quand_aucun_compte_n_est_ne`,
+`…ne_parle_pas_de_zero_restant` —, le cinquième (`…detaille_quand_meme_les_echecs`) passe dans
+les deux cas mais décrit le même lot et reçoit le même champ.
 
 Les deux fabriques locales à ajouter au fichier de test, pour ne pas répéter la construction
 d'un `Plan` à sept champs. Le helper `_plan(comptes, groupes)` adapté en T4 **reste** : les
@@ -2489,7 +2619,10 @@ Attendu : ÉCHEC sur les textes attendus.
 - [ ] **Étape 3 : écrire le rendu**
 
 `_ligne_du_travail` et `_ligne_des_orphelins` existent depuis T4, dans leur forme définitive :
-ne pas y toucher. Les trois lignes qui manquent :
+ne pas y toucher. Les trois lignes qui manquent — elles annotent `GroupeAmbigu` et
+`CompteAmbigu`, **à ajouter aux imports de `presentation.py`** depuis
+`stormshield_utilisateurs.modele`, à côté de `TravailCompte` posé en T4 (sans quoi `ruff` et
+`mypy` sont rouges dès l'écriture de ce bloc) :
 
 ```python
 def _ligne_des_non_rattaches(nombre: int) -> str:
@@ -2551,6 +2684,32 @@ dernier paragraphe devient :
     )
 ```
 
+**Le bilan d'un arrêt tombé avant le plan.** `_lignes_d_un_arret_demande` (l. 668) se dit
+contre `comptes_prevus`, qui n'a de sens qu'une fois le plan construit. Sur le chemin ouvert
+par T5 — arrêt pendant la lecture d'inventaire — il vaut zéro faute d'avoir été compté, et le
+bilan affirme alors « Aucun compte ne restait à créer. » quand le CSV en portait. Mesuré tel
+quel avant correction, avec un CSV d'un compte à créer. Poser la branche **en tête de la
+fonction**, avant tout calcul :
+
+```python
+    if not rapport.plan_construit:
+        # Arrêt tombé pendant la lecture d'inventaire : rien n'a été compté, donc rien
+        # ne peut être dit de ce qui restait à créer. « Aucun compte ne restait à
+        # créer » se lirait comme « le fichier n'apportait rien », ce qui est faux.
+        return [
+            "Arrêt demandé.",
+            "Le lot s'est arrêté pendant la lecture de l'état du firewall : aucun plan "
+            "n'a été construit.",
+            "Rien n'a été écrit sur le firewall.",
+            "Relancez quand vous voulez : le lot repartira de la première lecture.",
+        ]
+```
+
+La forme v1 est conservée — quatre lignes, « Arrêt demandé. » en tête, « Relancez quand vous
+voulez : … » en queue — et la suite de la fonction ne bouge pas d'une ligne : le chemin
+historique rend exactement ce qu'il rendait. `lignes_du_rapport` non plus ne change pas, elle
+continue d'aiguiller sur `MotifArret.OPERATEUR`.
+
 - [ ] **Étape 4 : purger « déjà présent, ignoré »**
 
 Trois textes visibles et trois docstrings mentent désormais :
@@ -2568,8 +2727,10 @@ Trois textes visibles et trois docstrings mentent désormais :
 - `fenetre.py:389-390` (docstring de `_confirmer_la_perte_des_secrets`, la formule court sur
   deux lignes) : idem. **Aucune autre ligne de `fenetre.py` ne change** — vérifié : la fenêtre
   ne touche le plan que par `lignes_du_plan` (l. 526-527).
-- `execution.py::_arreter_par_l_operateur` : « seront vus comme déjà présents » reste vrai,
-  ne pas y toucher.
+- `execution.py::_arreter_par_l_operateur` : sa formule « seront vus comme déjà présents »
+  reste vraie et ne change pas ici. **T5 y a déjà posé sa branche** — le texte du chemin
+  « arrêt avant le plan » —, et T6 ne touche pas ce fichier : rien à faire dans cette étape,
+  la moitié `presentation.py` du même défaut est traitée à l'étape 3.
 
 - [ ] **Étape 5 : lancer la suite entière**
 
@@ -2649,9 +2810,21 @@ fait pas », « Simulation », « Arrêter un lot en cours » et « Mots de pass
 
 Indépendante de T9 et T10.
 
-`grep -n "ignoré" README.md` doit rendre **zéro ligne** à la fin de cette tâche : la formule
-vit aux lignes 73, 88 (« comptes ignorés »), 107 et 120 — les deux dernières hors des sections
-que le plan visait, d'où l'étape 4.
+**Critère de fin, à la lettre** — deux `grep`, et deux seulement :
+
+```bash
+grep -n "déjà présent, ignoré" README.md   # doit rendre zéro ligne (aujourd'hui : 73, 107, 120)
+grep -n "comptes ignorés" README.md        # doit rendre zéro ligne (aujourd'hui : 88)
+```
+
+Ce sont les quatre phrases qui décrivent un compte déjà présent comme entièrement ignoré,
+comportement que la v2 abandonne. Les lignes 107 et 120 sont hors des sections que le plan
+visait, d'où l'étape 4.
+
+**Ne pas viser `grep -n "ignoré" README.md`** : la **l. 50** — « toute colonne en trop est
+ignorée » — parle des colonnes du CSV, elle est exacte, la v2 n'y change rien et elle doit
+rester. Un critère qui exigerait zéro occurrence du mot pousserait à abîmer une phrase juste
+pour satisfaire un `grep`.
 
 - [ ] **Étape 1 : réécrire le paragraphe de rapprochement**
 
@@ -2780,8 +2953,14 @@ identique aux cas existants (`**N — Titre** · boîtier : oui`, puis *Objectif
 - [ ] **Étape 3 : mettre à jour le récapitulatif et la traçabilité**
 
 - Ajouter au tableau : `| R — Boîtier déjà peuplé (v2) | 122 – 139 | **oui** |`.
-- Les deux lignes de synthèse deviennent : **22 cas sans boîtier** (inchangé),
-  **117 cas exigeant un boîtier**, **139 cas au total**.
+- Les deux lignes de synthèse de fin de fichier (l. 1388-1390) deviennent : **22 cas sans
+  boîtier** (inchangé), **117 cas exigeant un boîtier**, **139 cas au total**.
+- **Les mêmes compteurs vivent en tête du fichier**, § « Comment s'en servir »
+  (l. 26-28) : « 99 cas » devient **117 cas**, « **121 cas au total.** » devient
+  **139 cas au total.** Les laisser en l'état donnerait un cahier qui se contredit à deux
+  pages d'intervalle, et c'est la tête que l'humain en recette lit en premier. Vérification :
+  `grep -n "121 cas\|99 cas" docs/recette/2026-09-16-cahier-recette-v1.md` doit rendre zéro
+  ligne à la fin de l'étape.
 - Sous « Traçabilité », ajouter une correspondance en prose **spec v2 → cas**, sur le modèle
   des correspondances existantes : casse des comptes → 125 ; casse des groupes → 128 ;
   collision de groupes → 129, 130 ; collision de comptes → 138, 139 ; colonne vide → 127 ;
@@ -2835,7 +3014,28 @@ groupes, ajoute des adhésions — et n'enlève jamais rien.
   lui : il était le sous-produit du `USER SHOW` par compte.
 ```
 
-- [ ] **Étape 2 : compléter « Points à lever dès qu'un boîtier est joignable »**
+- [ ] **Étape 2 : redresser l'invariant de `## Décisions actées`**
+
+`KANBAN.md:22-23` porte encore l'invariant v1 : « Ajout seul : jamais de suppression, jamais
+de modification d'un compte existant. Les orphelins sont signalés, pas touchés. » La v2 en
+abandonne la moitié — elle ajoute des adhésions à un compte existant. C'est la seule section
+du fichier qu'un lecteur consulte pour connaître les invariants **courants** ; l'entrée datée
+de l'étape 1 ne la corrige pas, un journal ne se relit pas pour cela. Remplacer ces deux
+lignes par :
+
+```markdown
+- Ajout seul : jamais de suppression, jamais de retrait d'appartenance. Un compte
+  existant n'est ni supprimé, ni désactivé, ni modifié dans ses attributs, et son mot
+  de passe reste hors d'atteinte ; depuis la v2 il reçoit les adhésions de groupe que
+  le fichier lui donne et que le boîtier n'a pas. Les orphelins sont signalés, pas
+  touchés.
+```
+
+**Rien d'autre dans le journal ne se réécrit** : les entrées datées de `## Terminé` — dont
+`KANBAN.md:85`, « quatre commandes quel que soit le CSV » — disent ce qui était vrai à leur
+date et restent telles quelles.
+
+- [ ] **Étape 3 : compléter « Points à lever dès qu'un boîtier est joignable »**
 
 Trois entrées, dans cet ordre de priorité :
 
@@ -2853,13 +3053,13 @@ Trois entrées, dans cet ordre de priorité :
   groupe ni le compte en cause n'est touché (cas 129 et 138).
 ```
 
-- [ ] **Étape 3 : ajouter les pièges rencontrés**
+- [ ] **Étape 4 : ajouter les pièges rencontrés**
 
 Si l'exécution du plan en a rencontré, les consigner en fin de fichier au format
 `- (2026-09-17) **Titre** : description`. Sinon, ne rien ajouter — un journal qui invente
 des pièges ne sert plus à rien.
 
-- [ ] **Étape 4 : commit**
+- [ ] **Étape 5 : commit**
 
 ```bash
 git add KANBAN.md && git commit -m "docs: KANBAN — entrée v2, points à lever au premier boîtier"
@@ -2915,3 +3115,8 @@ git add KANBAN.md && git commit -m "docs: KANBAN — entrée v2, points à lever
 7. **La ligne des orphelins ne s'affiche pas quand le nombre est nul** (voir l'arbitrage écrit
    en T6, étape 3). Un journal sans cette ligne dit zéro ; une ligne « 0 compte » au-dessus du
    plan est du bruit.
+8. **L'arrêt demandé a désormais deux récits, parce qu'il a deux moments.** Avant le plan, le
+   journal (T5) et le bilan (T6) ne parlent ni d'un compte mené à son terme, ni de ce qui
+   restait à créer : rien n'avait été entamé, rien n'avait été compté. `Rapport.plan_construit`
+   porte cette distinction — `comptes_prevus == 0` ne la porte pas, il vaut zéro dans les deux
+   cas. Le chemin historique, lui, rend exactement les textes de la v1.
