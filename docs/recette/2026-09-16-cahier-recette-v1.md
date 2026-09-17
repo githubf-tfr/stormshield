@@ -1,7 +1,12 @@
-# Cahier de recette — injection d'utilisateurs LDAP v1
+# Cahier de recette — injection d'utilisateurs LDAP (v1 et v2)
 
 Recette fonctionnelle, **exécutée par un humain**, sur le `.exe` publié en release et sur un
 firewall SNS de maquette.
+
+> **Les cas marqués *(v2)* remplacent l'attendu d'origine.** La v2 — le boîtier déjà peuplé —
+> ne s'ajoute pas à la v1 : elle rend faux douze attendus déjà numérotés, corrigés en place
+> ci-dessous. Le numéro et l'intitulé de ces cas ne changent pas ; seul leur *Attendu* change.
+> La section **R** rassemble les cas propres à la v2.
 
 ## Pourquoi ce cahier n'est pas une formalité
 
@@ -11,9 +16,11 @@ Deux modules entiers du produit n'ont **jamais été exécutés** :
   Aucun test ne l'importe, aucun ne l'importera. Ce cahier est sa **seule** couverture.
 - `stormshield_utilisateurs/boitier_sdk.py` — écrit contre la documentation SNS et contre le
   SDK réellement installé, mais **il n'a jamais parlé à un vrai boîtier**. Plusieurs de ses
-  choix sont des hypothèses, listées en section F ; elles se confirment ou se démentent ici.
+  choix sont des hypothèses, listées en section F pour la v1 et en section R pour la v2 —
+  la forme des membres rendus par `USER GROUP SHOW`, la syntaxe de cette commande et la
+  sensibilité du boîtier à la casse ; elles se confirment ou se démentent ici.
 
-Les tests unitaires (296, marqueur `firewall` exclu) prouvent que le code fait ce qui a été
+Les tests unitaires (380, marqueur `firewall` exclu) prouvent que le code fait ce qui a été
 écrit. Ce cahier prouve que le produit fait ce qu'on attend. Les cas déjà couverts en
 unitaire y figurent donc **volontairement**.
 
@@ -23,8 +30,8 @@ ci-dessous est formulé pour se trancher sans interprétation.
 ## Comment s'en servir
 
 - **Boîtier : non** — se joue sur un poste Windows seul. 22 cas.
-- **Boîtier : oui** — exige un SNS de maquette joignable. 99 cas.
-- **121 cas au total.**
+- **Boîtier : oui** — exige un SNS de maquette joignable. 117 cas.
+- **139 cas au total.**
 
 Jouer d'abord les cas sans boîtier (sections B à D), puis les sections E et suivantes.
 Consigner le verdict de chaque cas : **OK**, **KO** ou **NJ** (non joué, avec le motif).
@@ -59,6 +66,23 @@ boîtier au premier passage.
 | `lot-nom-compose.csv` | une ligne `p.delatour;De La Tour;Pierre;` |
 | `lot-nom-guillemet.csv` | trois lignes valides, dont `d.oconnor;O"Connor;Diane;` — le guillemet double est dans le **nom**, pas dans un groupe |
 | `lot-200.csv` | 200 comptes neufs, chacun rattaché à un groupe parmi trois |
+
+### Matière d'essai supplémentaire (v2)
+
+Nécessaire aux seuls cas de la section R. Même format que ci-dessus.
+
+| Fichier | Contenu |
+|---|---|
+| `lot-compte-present-casse.csv` | une ligne `jean.dupont;Dupont;Jean;compta-recette` — le compte existe sur le boîtier sous une **autre casse** |
+| `lot-compte-present-sans-groupe.csv` | une ligne dont le compte **existe** sur le boîtier, colonne `groupes` **vide** |
+| `lot-groupe-casse.csv` | une ligne valide, colonne groupes = `compta` en minuscules |
+| `lot-groupe-collision.csv` | deux lignes valides, la première citant `COMPTA`, la seconde `lecture-recette` |
+| `lot-5-groupes.csv` | 2 comptes citant 5 groupes distincts `g1-recette` … `g5-recette` |
+
+État du boîtier à préparer pour ces cas — à monter depuis l'interface web du firewall, l'outil
+ne sachant rien retirer : un compte `Jean.Dupont`, un groupe `Compta`, et selon les cas une
+seconde graphie (`COMPTA`, `JEAN.DUPONT`, `jean.dupont`). **Les retirer entre deux cas** : une
+graphie oubliée fait basculer un cas voisin dans l'ambiguïté et rend son verdict illisible.
 
 ---
 
@@ -295,10 +319,16 @@ sur le boîtier (voir cas 31 pour `MinSet`). Les quatre cases sont cochées et l
 *Verdict* : OK / KO —
 
 **23 — La barre de simulation atteint son total** · boîtier : oui
-*Objectif* : une simulation ne compte que ses quatre lectures.
-*Départ* : CSV = `lot-nominal.csv`, Simulation cochée.
+*Objectif* : une simulation ne compte que ses lectures.
+*Départ* : CSV = `lot-nominal.csv`, Simulation cochée. Relever sur le boîtier lesquels des
+groupes cités par le CSV y figurent déjà : c'est le nombre `g`.
 *Actions* : lancer, lire l'étiquette à droite de la barre à la fin.
-*Attendu* : « **4 / 4** » et une barre pleine. Le nombre d'opérations à écrire n'entre pas
+*Attendu* **(v2)** : « **4 + g / 4 + g** » et une barre pleine, où `g` est le nombre de
+groupes du CSV **déjà présents sur le boîtier** — la lecture vaut quatre commandes fixes plus
+un `USER GROUP SHOW` par groupe cité et reconnu. Pour `lot-nominal.csv` sur un boîtier vierge,
+`g = 0` et l'étiquette lit « 4 / 4 » ; le cas 49 joué, les deux groupes existent et elle lit
+« 6 / 6 ». Un groupe cité **absent** du boîtier n'est pas lu et ne compte pas ; un groupe
+présent mais que le fichier ne cite pas non plus. Le nombre d'opérations à écrire n'entre pas
 dans le total en simulation.
 *Verdict* : OK / KO —
 
@@ -318,21 +348,32 @@ journal.
 elle apparaît **avant** toute ligne de création.
 *Verdict* : OK / KO —
 
-**26 — Un groupe réclamé par un compte déjà présent n'est pas créé** · boîtier : oui
-*Objectif* : l'outil ne touche pas à ce qui existe, appartenances comprises.
+**26 — Un groupe réclamé par un compte déjà présent est bien créé** · boîtier : oui
+*Objectif* : l'outil ne recrée pas un compte existant, mais il lui pose les adhésions que le
+fichier lui donne — et crée pour cela les groupes qui manquent.
 *Départ* : le compte du CSV `lot-groupe-sur-compte-present.csv` **existe** sur le boîtier ;
-le groupe `fantome-recette` n'existe pas.
+le groupe `fantome-recette` n'existe pas. Relever les appartenances actuelles de ce compte.
 *Actions* : lancer en simulation, puis décocher Simulation et relancer.
-*Attendu* : aucune ligne « Groupes à créer » ne mentionne `fantome-recette` ; le compte est
-listé « déjà présent, ignoré ». Après le lot réel, `fantome-recette` **n'existe toujours
-pas** sur le boîtier et l'appartenance du compte existant est inchangée.
+*Attendu* **(v2)** : la ligne « Groupes à créer : fantome-recette (1 membre) » **apparaît**,
+et le compte est annoncé « <identifiant> : présent — ajouté à fantome-recette ». La liste des
+groupes à créer se calcule sur **toutes** les adhésions du plan, y compris celles posées sur
+des comptes que l'outil n'a pas créés. Après le lot réel, `fantome-recette` **existe** sur le
+boîtier et le compte en est membre. Le compte est inchangé **par ailleurs** : mêmes nom et
+prénom, mêmes autres appartenances qu'au relevé de départ, et **aucun `USER PASSWORD` ne le
+vise** — son mot de passe d'origine fonctionne toujours (cas 134).
 *Verdict* : OK / KO —
 
 **27 — Les orphelins sont signalés, jamais touchés** · boîtier : oui
 *Objectif* : l'outil ajoute et rien d'autre.
 *Départ* : un compte `temoin.recette` existe sur le boîtier et **n'est dans aucun CSV**.
 *Actions* : lancer un lot réel avec `lot-nominal.csv`, puis relire le boîtier.
-*Attendu* : le journal porte « Orphelins sur le boîtier : … , temoin.recette, … ». Après le
+*Attendu* **(v2)** : le journal porte **une seule ligne**, « **N comptes du boîtier ne
+figurent pas dans le fichier : ils ne seront pas touchés.** », où N est le nombre de comptes
+du boîtier absents du CSV — et **aucun nom d'orphelin n'est écrit**, `temoin.recette` pas plus
+qu'un autre. Sur un boîtier de plusieurs centaines de comptes, cette ligne reste unique : le
+plan et les rejets se lisent sans faire défiler. Accord au singulier pour un seul orphelin :
+« 1 compte du boîtier ne figure pas dans le fichier : il ne sera pas touché. » **Zéro
+orphelin : aucune ligne du tout** — vérifier qu'il ne s'affiche pas « 0 compte… ». Après le
 lot, `temoin.recette` existe toujours, avec les mêmes attributs et les mêmes appartenances.
 *Verdict* : OK / KO —
 
@@ -365,8 +406,8 @@ espace n'apparaît.
 
 # F. Hypothèses de l'adaptateur SDK à confirmer
 
-**C'est la section la plus importante de ce cahier.** Chacun de ces points est une
-supposition écrite contre la documentation, que rien n'a jamais confirmée. Un KO ici n'est
+**C'est, avec la section R, la section la plus importante de ce cahier.** Chacun de ces points
+est une supposition écrite contre la documentation, que rien n'a jamais confirmée. Un KO ici n'est
 pas un détail : il invalide le plancher de politique affiché, ou fait voir le boîtier comme
 vierge.
 
@@ -416,10 +457,11 @@ alphaspecial, none, ou un entier »), aucune écriture.
 fausse, `lister_utilisateurs()` rend une liste vide et **le boîtier passe pour vierge**.
 *Départ* : le boîtier porte au moins 3 comptes connus, dont 2 sont dans `lot-nominal.csv`.
 *Actions* : lancer une simulation avec `lot-nominal.csv`.
-*Attendu* : les 2 comptes déjà présents sont annoncés « déjà présent, ignoré », **et** la
-ligne « Orphelins sur le boîtier : … » liste les comptes du boîtier absents du CSV. Le KO
-caractéristique : tous les comptes sont annoncés « à créer » et **aucun orphelin** n'est
-listé — signe que la liste lue est vide.
+*Attendu* **(v2)** : les 2 comptes déjà présents sont annoncés « **présent — rien à faire** »,
+ou « **présent — ajouté à …** » si le CSV leur donne un groupe qu'ils n'ont pas encore, **et**
+la ligne des orphelins annonce un **nombre non nul** de comptes du boîtier absents du CSV
+(cas 27 pour sa forme exacte). Le KO caractéristique est inchangé : tous les comptes sont
+annoncés « à créer » et **zéro orphelin** — signe que la liste lue est vide.
 *Verdict* : OK / KO —
 
 **36 — Clé `name` de `USER GROUP LIST`** · boîtier : oui
@@ -575,8 +617,11 @@ pleine et l'étiquette affiche un couple `N / N` identique. Le rapport final lit
 *Objectif* : `USER GROUP ADDUSER` n'est pas seulement compté, il agit.
 *Départ* : cas 49 joué.
 *Actions* : relire les membres de `compta-recette` et `lecture-recette` sur le boîtier.
-*Attendu* : chaque compte figure dans **exactement** les groupes que le CSV lui donnait, et
-dans aucun autre. Le compte sans groupe n'appartient à aucun des deux.
+*Attendu* **(v2)** : chaque compte figure dans **au moins** les groupes que le CSV lui
+donnait. « Exactement » n'est plus exigible : l'outil n'enlève rien, et une adhésion
+préexistante hors CSV subsiste — c'est la promesse de la boîte de confirmation (cas 135). Le
+compte sans groupe n'a reçu **aucune** adhésion nouvelle ; s'il en portait déjà, elles sont
+intactes.
 *Verdict* : OK / KO —
 
 **51 — Idempotence : relancer ne réécrit rien** · boîtier : oui
@@ -584,18 +629,24 @@ dans aucun autre. Le compte sans groupe n'appartient à aucun des deux.
 *Départ* : cas 49 joué, boîtier à jour, **aucun** fichier d'état sur le poste.
 *Actions* : relancer le **même** CSV en lot réel ; relever l'heure de dernière modification
 des comptes sur le boîtier avant et après.
-*Attendu* : les 3 comptes tombent en « **déjà présent, ignoré** », aucune ligne « Groupes à
-créer », le rapport lit « Terminé : 0 compte créé, 0 groupe créé, 0 échec. » et la barre
-affiche « **4 / 4** ». Les comptes du boîtier sont **inchangés**, date de modification
-comprise.
+*Attendu* **(v2)** : les 3 comptes tombent en « **présent — rien à faire** », aucune ligne
+« Groupes à créer », **aucune ligne « présent — ajouté à … »**, et **aucune ligne de membres
+non rattachés** (cas 122). La boîte « Écrire sur le firewall » s'ouvre quand même — elle
+s'ouvre sur tout lot réel, fût-il vide — et annonce « 0 compte à créer, 0 groupe neuf. » puis
+« 0 adhésion à ajouter. » ; répondre **Oui**. **Aucune commande d'écriture ne part alors** :
+ni `USER CREATE`, ni `USER PASSWORD`, ni `USER GROUP CREATE`, ni `USER GROUP ADDUSER`. Le
+rapport lit « Terminé : 0 compte créé, 0 groupe créé, 0 échec. » et la barre affiche
+« **6 / 6** » — `4 + g` avec `g = 2`, les deux groupes du CSV existant désormais (cas 23). Les
+comptes du boîtier sont **inchangés**, date de dernière modification comprise.
 *Verdict* : OK / KO —
 
 **52 — Idempotence après déplacement du poste** · boîtier : oui
 *Objectif* : aucun état caché ne voyage avec l'exécutable.
 *Départ* : cas 51 joué.
 *Actions* : copier le `.exe` sur un **autre** poste, y rejouer le même CSV en lot réel.
-*Attendu* : même résultat qu'au cas 51 — tout est « déjà présent, ignoré ». Le premier
-lancement sur ce poste n'est pas traité comme un lot neuf.
+*Attendu* **(v2)** : même résultat qu'au cas 51 — tout est « **présent — rien à faire** », et
+aucune commande d'écriture ne part. Le premier lancement sur ce poste n'est pas traité comme
+un lot neuf.
 *Verdict* : OK / KO —
 
 **53 — Accents d'un CSV Excel français** · boîtier : oui
@@ -628,10 +679,15 @@ tenu. (Si le boîtier exige plus, voir le cas 46 : le refus est légitime.)
 **56 — Progression d'un lot réel** · boîtier : oui
 *Objectif* : la barre et l'étiquette disent la vérité.
 *Départ* : `lot-nominal.csv`, 3 comptes dont 2 avec un groupe chacun, 2 groupes à créer.
-*Actions* : lancer en réel, noter le premier et le dernier couple affichés.
-*Attendu* : le total vaut **4 lectures + 2 créations de groupe + (2 + nombre de groupes) par
-compte**. L'étiquette part de `0 / total` et finit sur `total / total`, la barre pleine ; les
-valeurs intermédiaires ne reculent jamais.
+*Actions* : lancer en réel, noter le couple affiché **à chaque changement** : au démarrage, à
+la fin de la lecture, juste après avoir répondu *Oui* à la confirmation, puis à la fin.
+*Attendu* **(v2)** : le total vaut **4 + g lectures** + **1 par groupe neuf** + **2 par compte
+à créer** + **1 par adhésion**, où `g` est le nombre de groupes du CSV déjà présents (cas 23).
+Il **croît une fois et une seule**, juste **après la confirmation** : pendant toute la lecture
+il vaut `4 + g`, puis il saute au total complet dès que l'opérateur a répondu *Oui*. Il ne
+croît **plus jamais** ensuite — une reconnexion en cours de lot ne peut que le faire baisser
+(cas 80). L'étiquette part de `0 / 4 + g` et finit sur `total / total`, la barre pleine ; la
+valeur affichée ne recule jamais.
 *Verdict* : OK / KO —
 
 **57 — Accords du rapport final** · boîtier : oui
@@ -771,10 +827,12 @@ mot de passe** ». Les trois nombres sont justes et les accords corrects.
 *Objectif* : le scénario le plus coûteux du produit — des secrets détruits en silence.
 *Départ* : un lot réel a créé 3 comptes avec mot de passe ; **ne pas** cliquer *Enregistrer*.
 *Actions* : cliquer *Lancer*.
-*Attendu* : une boîte d'avertissement annonce « **3 mots de passe n'ont pas été
-enregistrés** dans un fichier », dit que les comptes resteront créés et seront classés « déjà
-présent, ignoré », et demande « Lancer quand même ? ». **Le bouton présélectionné est
-« Non »** : appuyer sur Entrée doit annuler, pas lancer.
+*Attendu* **(v2)** : une boîte d'avertissement annonce « **3 mots de passe n'ont pas été
+enregistrés** dans un fichier », puis « Lancer un nouveau lot les efface définitivement. Les
+comptes, eux, restent créés sur le firewall : aucun relancement ne leur redonnera de mot de
+passe, **ils seront vus comme déjà présents et ne recevront plus que leurs adhésions
+manquantes.** », et demande « Lancer quand même ? ». Le mot « ignoré » n'y figure plus. **Le
+bouton présélectionné est « Non »** : appuyer sur Entrée doit annuler, pas lancer.
 *Verdict* : OK / KO —
 
 **71 — Répondre Non** · boîtier : oui
@@ -906,9 +964,11 @@ et porte « La liaison est tombée : **relancer le lot suffit, rien à corriger.
 *Objectif* : le lot reprend là où il en est, sans rien créer deux fois.
 *Départ* : cas 82 joué, réseau rebranché ; relever ce que le boîtier porte réellement.
 *Actions* : relancer le **même** CSV en lot réel ; comparer au relevé.
-*Attendu* : les comptes déjà créés tombent en « déjà présent, ignoré », les autres sont
-créés, et le boîtier finit avec **exactement** les 200 comptes, chacun une fois. Aucun échec
-« existe déjà ».
+*Attendu* **(v2)** : les comptes déjà créés sont vus comme présents — « **présent — rien à
+faire** », ou « **présent — ajouté à …** » si le CSV leur donne un groupe qu'ils n'ont pas
+encore, ce qui est le cas de celui que la coupure a laissé sans ses rattachements. Les autres
+sont créés, et le boîtier finit avec **exactement** les 200 comptes, chacun une fois. Aucun
+échec « existe déjà ».
 *Verdict* : OK / KO —
 
 **84 — Coupure entre la création et le mot de passe** · boîtier : oui
@@ -1281,9 +1341,13 @@ comptes du CSV sous les yeux.
 *Actions* : cliquer une fois sur *Arrêter* ; noter le **dernier** identifiant porté par une
 ligne « … : créé » du journal, et celui qui le suit dans le CSV. Attendre le bilan, puis
 relire le boîtier (`USER LIST`, appartenances du groupe de ce compte).
-*Attendu* : **dès le clic**, le journal porte la ligne « **Arrêt demandé : le compte en cours
-va d'abord à son terme, puis le lot s'arrête.** » — l'opérateur ne reste jamais sans réponse.
-Le lot s'arrête ensuite **quelques secondes** après le clic, pas immédiatement. Le dernier
+*Attendu* **(v2)** : **dès le clic**, le journal porte la ligne « **Arrêt demandé : le lot
+s'arrête dès que l'opération en cours est allée à son terme — une lecture pendant
+l'inventaire, un compte entamé pendant l'écriture.** » — l'opérateur ne reste jamais sans
+réponse. Cette ligne est la **même dans les deux phases**, et c'est voulu : elle part du clic,
+sans savoir où le lot en est, donc elle ne peut promettre aucun compte en cours. Vérifier
+expressément qu'elle **ne parle pas** du « compte en cours » : sur un arrêt tombé pendant la
+lecture (cas 132), elle contredirait le bilan qui suit. Le lot s'arrête ensuite **quelques secondes** après le clic, pas immédiatement. Le dernier
 compte annoncé créé **existe** sur le boîtier et **est membre** du groupe que le CSV lui
 donne ; le compte suivant du CSV **n'existe pas** sur le boîtier. Aucune ligne d'échec n'est
 apparue du fait de l'arrêt.
@@ -1317,23 +1381,33 @@ arrêt sans objet.
 *Objectif* : la promesse du bilan — « relancer est sans danger » — doit être vraie.
 *Départ* : cas 115 joué ; relever ce que le boîtier porte réellement.
 *Actions* : relancer le **même** CSV en lot réel, confirmer, laisser aller jusqu'au bout.
-*Attendu* : les N comptes du premier lot tombent en « **déjà présent, ignoré** », les autres
-sont créés, et le boîtier finit avec **exactement** 200 comptes, chacun une fois. Aucun échec
-« existe déjà ».
+*Attendu* **(v2)** : les N comptes du premier lot sont vus comme présents — « **présent —
+rien à faire** », ou « **présent — ajouté à …** » si le CSV leur donne un groupe qu'ils n'ont
+pas encore. Les autres sont créés, et le boîtier finit avec **exactement** 200 comptes, chacun
+une fois. Aucun échec « existe déjà ». C'est la promesse du bilan — « relancer est sans
+danger » — que ce cas vérifie, et elle reste entière.
 *Verdict* : OK / KO —
 
 **119 — Arrêt pendant une simulation** · boîtier : oui
 *Objectif* : l'état des deux boutons ne dépend pas du mode — un bouton qui ne réagirait que
 dans un cas sur deux serait déroutant —, et une simulation arrêtée le dit sans prétendre avoir
 créé quoi que ce soit.
-*Départ* : `lot-200.csv`, **Simulation cochée**.
+*Départ* : `lot-200.csv`, **Simulation cochée**, sur un boîtier ne portant **aucun** des trois
+groupes cités par le CSV — donc `g = 0`.
 *Actions* : cliquer *Lancer*, puis *Arrêter* pendant la lecture du boîtier. Cette fenêtre vaut
-quatre commandes, soit une seconde ou deux : **noter NJ si le moment ne peut pas être visé.**
-*Attendu* : le lot s'arrête, le bilan est celui d'un **arrêt demandé** et annonce « **0 compte
-créé sur … prévus** ». Sa **quatrième ligne** est « **Relancez quand vous voulez : aucun compte
-n'a été créé, le lot repartira de zéro.** » — elle ne doit **pas** parler d'un « compte créé »
-qui serait vu comme déjà présent. Le boîtier relu est **strictement identique** à son état de
-départ.
+`4 + g` commandes (cas 23), soit ici quatre, soit une seconde ou deux : **noter NJ si le
+moment ne peut pas être visé.**
+*Attendu* **(v2)** : le lot s'arrête, le bilan est celui d'un **arrêt demandé** et annonce
+« **0 compte créé sur … prévus** ». Sa **quatrième ligne** est « **Relancez quand vous voulez :
+aucun compte n'a été créé, le lot repartira de zéro.** » — elle ne doit **pas** parler d'un
+« compte créé » qui serait vu comme déjà présent. Le boîtier relu est **strictement
+identique** à son état de départ.
+**`g = 0` est la condition du cas**, et c'est ce qui le distingue du cas 132 : aucune lecture
+d'adhésions n'ayant lieu, le premier point d'arrêt atteint est celui qui suit la construction
+du plan, et le bilan est donc celui d'un arrêt **après** le plan. Le clic pendant la lecture
+des adhésions est un point d'arrêt à part entière, avec son propre bilan — il se joue au
+cas 132. Si le boîtier porte déjà les groupes cités, ce cas bascule sur celui du cas 132 :
+recommencer sur un boîtier sans ces groupes, ou noter NJ.
 *Verdict* : OK / KO / NJ —
 
 **120 — Arrêt avant la confirmation d'écriture** · boîtier : oui
@@ -1357,6 +1431,339 @@ dans la mémoire du processus, et les comptes, eux, existent sur le boîtier.
 bilan, et aucun autre — avec un mot de passe non vide pour chacun, **y compris pour le dernier
 compte créé avant l'arrêt**.
 *Verdict* : OK / KO —
+
+---
+
+# R. Boîtier déjà peuplé (v2)
+
+**C'est la section qui tranche les hypothèses de la v2.** La v1 supposait un boîtier
+essentiellement vierge : elle ne lisait les membres d'aucun groupe et se contentait de dire
+« déjà présent » d'un compte qu'elle ne touchait pas. La v2 lit les adhésions existantes
+(`USER GROUP SHOW`), rapproche les identités sans tenir compte de la casse et pose les
+adhésions manquantes. Trois choses n'ont jamais été vérifiées contre un vrai boîtier : la
+**forme** des membres rendus, la **syntaxe** de la commande qui les rend, et la **sensibilité
+à la casse** du boîtier sur les `uid` et les noms de groupes.
+
+**Ordre de jeu.** Jouer le cas **122 en premier**, dès le premier boîtier joignable, avant même
+de juger l'idempotence : il coûte une simulation et il dit en une ligne si l'hypothèse
+structurante tient. Puis 123 et 124, qui relèvent la réponse brute. Le cas **133** est le
+verdict d'ensemble et se joue en dernier.
+
+**Ordre des lignes du plan**, valable pour tous les cas de cette section — le journal les écrit
+toujours dans cet ordre, et un ordre différent est un KO à consigner :
+
+1. « Groupes à créer : … » (une seule ligne, si au moins un groupe est neuf) ;
+2. une ligne par compte du fichier, dans l'ordre du fichier ;
+3. les groupes ambigus (cas 129) ;
+4. les comptes ambigus (cas 138) ;
+5. les orphelins, **une seule ligne**, et seulement s'il y en a (cas 27) ;
+6. les membres non rattachés, **une seule ligne**, et seulement s'il y en a (cas 122).
+
+**122 — Le compteur des membres non rattachés** · boîtier : oui
+*Objectif* : trancher en une lecture l'hypothèse structurante de la v2 — les membres rendus
+par `USER GROUP SHOW` sont des DN de la forme `uid=<identifiant>,…`, et l'outil sait les
+relier aux comptes du boîtier.
+*Départ* : n'importe quel CSV citant un groupe **peuplé** du boîtier (au moins deux membres) —
+par exemple `lot-nominal.csv` une fois le cas 49 joué. Simulation cochée.
+*Actions* : lancer, lire la **dernière** ligne du plan.
+*Attendu* : **aucune ligne ne parle de membres non reconnus.** Le compteur vaut zéro, et une
+ligne nulle ne s'écrit pas : son absence *est* le verdict attendu. Si elle apparaît, elle lit
+« **N membres de groupes n'ont pas pu être reconnus : les adhésions correspondantes seront
+renvoyées à chaque exécution.** » (au singulier : « 1 membre de groupe n'a pas pu être
+reconnu : l'adhésion correspondante sera renvoyée à chaque exécution. ») — c'est un **KO de
+l'hypothèse sur les DN**, en tout ou en partie : consigner N et la réponse brute du cas 123.
+Le nombre attendu est **zéro quel que soit le contenu du CSV** : les membres lus se comparent
+aux comptes que `USER LIST` a rendus, jamais au fichier. Un groupe peuplé contient forcément
+des gens légitimes qu'un CSV du jour ne cite pas, et ils ne doivent pas compter ici.
+*Conséquence d'un KO* : rien ne casse et rien ne s'arrête — le lot réussira. Mais les mêmes
+`USER GROUP ADDUSER` repartiront à chaque exécution : l'outil cesse d'être idempotent sans
+que rien d'autre ne le dise. La correction tient en un endroit du code, l'extraction de
+l'`uid` d'un DN.
+*Verdict* : OK / KO —
+
+**123 — Forme réelle de la réponse de `USER GROUP SHOW`, et nombre de membres lus** · boîtier : oui
+*Objectif* : confirmer la forme supposée de la réponse, et surtout vérifier que l'outil lit
+**autant** de membres que le texte brut en porte. Le compteur du cas 122 ne sait pas le faire :
+il détecte une mauvaise **forme de DN**, jamais un mauvais **format de réponse**.
+*Départ* : un groupe du boîtier portant **exactement deux membres**, tous deux comptes du
+boîtier ; un CSV citant ce groupe **et** ces deux comptes — ils y sont donc déjà membres.
+*Actions* : (1) depuis la console d'administration du boîtier, exécuter
+`USER GROUP SHOW group="<nom du groupe>"` et **recopier la réponse brute** dans le compte
+rendu de recette ; y compter les champs dont le nom commence par `member`. (2) lancer l'outil
+en simulation avec ce CSV et lire les deux lignes du plan qui concernent ces deux comptes.
+*Attendu*, en trois parties, toutes trois exigées :
+(a) la réponse brute porte une section **`[Group]`** et des champs **`member=`**,
+**`member_2=`**, … chacun portant un **DN commençant par `uid=`**. Consigner la réponse mot
+pour mot : elle est la référence de tout le reste ;
+(b) le nombre de champs `member…` comptés dans ce texte vaut **2** ;
+(c) l'outil a lu **les deux** : les deux comptes s'affichent « **présent — rien à faire** », et
+**aucun** ne s'affiche « présent — ajouté à <ce groupe> ».
+*Le KO silencieux à débusquer* : si **un seul** des deux comptes est annoncé « ajouté à » alors
+que le boîtier les porte tous deux, l'outil n'a lu qu'un membre sur deux — et le compteur du
+cas 122 vaut pourtant zéro, c'est-à-dire « tout va bien ». Deux causes possibles, invisibles
+l'une comme l'autre de ce compteur : le boîtier **répète le champ `member=`** sans suffixe
+numérique, auquel cas la bibliothèque écrase silencieusement la valeur précédente — deux
+membres entrent, un seul sort ; ou la réponse n'a **pas le format attendu** (une liste de
+lignes au lieu d'une section de jetons), auquel cas l'outil lit **zéro** membre et le compteur
+vaut zéro pour la pire des raisons. **Seul le texte brut garde la vérité** : c'est pourquoi ce
+cas se joue avec la réponse du boîtier sous les yeux, et non sur le seul affichage de l'outil.
+*Verdict* : OK / KO —
+
+**124 — `USER GROUP SHOW` sur un groupe sans membre** · boîtier : oui
+*Objectif* : un groupe vide ne doit ni arrêter le lot, ni faire croire à des adhésions
+existantes. La commande peut rendre une section vide **ou** un refus ; les deux doivent donner
+« aucun membre connu ».
+*Départ* : un groupe **vide** sur le boîtier, cité par le CSV avec au moins un compte à y
+rattacher.
+*Actions* : relever la réponse brute de `USER GROUP SHOW` sur ce groupe depuis la console du
+boîtier ; puis lancer l'outil en simulation, puis en lot réel ; relire les membres du groupe.
+*Attendu* : **le lot continue** dans les deux cas de figure. Le compte est annoncé « à créer,
+rattaché à <groupe> » ou « présent — ajouté à <groupe> », et après le lot réel il **est** membre
+du groupe. Si le boîtier a refusé la commande, le journal porte en plus « **groupe <nom> :
+membres illisibles (…) — ses adhésions seront toutes considérées comme manquantes** », et cela
+reste un OK. Consigner laquelle des deux issues s'est produite. Les seules issues inacceptables
+sont : le lot s'arrête, ou l'adhésion n'est pas posée.
+*Verdict* : OK / KO —
+
+**125 — Un compte créé à la main sous `Jean.Dupont`** · boîtier : oui
+*Objectif* : le rapprochement des comptes ignore la casse, et l'outil s'adresse au boîtier avec
+la graphie **du boîtier**.
+*Départ* : créer `Jean.Dupont` depuis l'interface web du firewall ; vérifier qu'aucun
+`jean.dupont` n'existe. CSV = `lot-compte-present-casse.csv`, dont la ligne porte
+`jean.dupont` et le groupe `compta-recette`.
+*Actions* : lancer en simulation et lire la ligne du plan ; puis en lot réel ; relire
+`USER LIST` et les membres de `compta-recette`.
+*Attendu* : le plan porte « **Jean.Dupont : présent — ajouté à compta-recette** » — la graphie
+du **boîtier**, pas celle du fichier. Après le lot : `USER LIST` ne porte toujours qu'**une
+seule** graphie, `Jean.Dupont` ; **aucun compte `jean.dupont` n'a été créé** ; le membre ajouté
+au groupe est `Jean.Dupont`. Le rapport annonce « 0 compte créé ». Le KO : un second compte
+`jean.dupont` apparaît — le rapprochement serait sensible à la casse, et l'idempotence rompue
+pour tout compte dont la graphie diffère entre le fichier et le boîtier.
+*Verdict* : OK / KO —
+
+**126 — Une adhésion ajoutée à un compte déjà présent** · boîtier : oui
+*Objectif* : un compte que l'outil n'a pas créé reçoit bien les adhésions que le fichier lui
+donne, et **rien d'autre**.
+*Départ* : un compte existant sur le boîtier, membre d'un groupe `autre-recette` que le CSV ne
+cite **pas** ; le CSV lui donne `compta-recette`. Relever ses appartenances et ses attributs.
+*Actions* : lancer un lot réel ; relire la fiche du compte et ses appartenances.
+*Attendu* : le journal porte « <identifiant> : présent — ajouté à compta-recette ». Après le
+lot, le compte est membre de `compta-recette` **et toujours** de `autre-recette` : l'outil
+n'enlève rien. Ses nom et prénom sont inchangés. Une seule commande l'a visé, un
+`USER GROUP ADDUSER` — **aucun `USER CREATE`, aucun `USER PASSWORD`**.
+*Verdict* : OK / KO —
+
+**127 — Colonne `groupes` vide sur un compte présent** · boîtier : oui
+*Objectif* : une colonne vide ne veut pas dire « aucun groupe », elle veut dire « rien à
+dire ». L'outil ne doit rien ajouter, et surtout rien retirer.
+*Départ* : CSV = `lot-compte-present-sans-groupe.csv` ; le compte **existe** sur le boîtier et
+est membre d'au moins un groupe. Relever ses appartenances.
+*Actions* : lancer un lot réel ; relire ses appartenances.
+*Attendu* : le journal porte « **<graphie du boîtier> : présent — rien à faire** ». **Aucune
+adhésion ajoutée, aucune retirée** : ses appartenances sont identiques au relevé. **Aucune
+commande d'écriture ne vise ce compte.** Le KO grave : une appartenance a disparu.
+*Verdict* : OK / KO —
+
+**128 — Un groupe `Compta` reconnu par une ligne `compta`** · boîtier : oui
+*Objectif* : le rapprochement des groupes ignore lui aussi la casse — sans quoi chaque lot
+créerait un doublon du même groupe.
+*Départ* : le boîtier porte **`Compta`** et lui seul — vérifier qu'aucune autre graphie n'y
+figure. CSV = `lot-groupe-casse.csv`, citant `compta` en minuscules.
+*Actions* : lancer en simulation, puis en lot réel ; relire `USER GROUP LIST`.
+*Attendu* : **aucune ligne « Groupes à créer »** — le groupe est reconnu malgré la casse. Le
+plan annonce « … rattaché à **Compta** » ou « présent — ajouté à **Compta** » : la graphie du
+boîtier. Après le lot, `USER GROUP LIST` porte toujours **un seul** groupe, `Compta` ; aucun
+groupe `compta` n'est apparu ; l'`ADDUSER` a visé `Compta`.
+*Verdict* : OK / KO —
+
+**129 — Collision de casse entre deux groupes** · boîtier : oui
+*Objectif* : deux graphies vivantes que la clé de rapprochement confond ne se tranchent pas au
+hasard. L'outil signale et poursuit.
+*Départ* : le boîtier porte **`Compta`** et **`compta`**, créés depuis l'interface web. CSV =
+`lot-groupe-collision.csv`, dont la première ligne cite `COMPTA` — aucune des deux graphies —
+et la seconde `lecture-recette`. **Si le boîtier refuse de porter deux graphies d'un même nom
+de groupe, noter NJ et consigner le refus** : l'ambiguïté ne peut alors pas se produire, et la
+sensibilité à la casse des noms de groupes est tranchée dans l'autre sens.
+*Actions* : lancer en simulation, puis en lot réel ; relire les membres des **deux** graphies.
+*Attendu* : le journal porte « **groupe COMPTA : le boîtier en porte 2 graphies (Compta,
+compta) — aucun compte n'y sera rattaché, le doublon se lève à la main sur le boîtier.** »,
+les graphies étant citées **triées par ordre alphabétique**. Aucun groupe n'est créé pour
+`COMPTA`. **Le lot continue** : la seconde ligne est traitée normalement, son compte créé et
+rattaché à `lecture-recette`. Après le lot, **ni `Compta` ni `compta` n'a reçu de nouveau
+membre**. Vérifier au passage l'ordre des lignes du plan annoncé en tête de section : le
+signalement de groupe ambigu vient **après** les comptes et **avant** les orphelins.
+*Verdict* : OK / KO / NJ —
+
+**130 — Collision de groupes levée par une correspondance exacte** · boîtier : oui
+*Objectif* : l'ambiguïté n'existe que faute de correspondance exacte. Dès que le fichier écrit
+l'une des graphies du boîtier mot pour mot, il n'y a plus rien à trancher.
+*Départ* : même boîtier qu'au cas 129 — `Compta` **et** `compta`. CSV = `lot-groupe-casse.csv`,
+citant **`compta`** exactement.
+*Actions* : lancer en simulation, puis en lot réel ; relire les membres des deux graphies.
+*Attendu* : **aucun signalement d'ambiguïté** — la ligne « le boîtier en porte 2 graphies »
+n'apparaît pas. C'est **`compta`** qui est visé, et l'`ADDUSER` lui a bien ajouté le compte ;
+`Compta` n'a **rien** reçu. Aucun groupe n'est créé.
+*Verdict* : OK / KO / NJ —
+
+**131 — Lecture à `4 + g` commandes** · boîtier : oui
+*Objectif* : la phase de lecture interroge les groupes **cités et présents**, ceux-là seulement.
+Ni tous les groupes cités, ni aucun.
+*Départ* : CSV = `lot-5-groupes.csv`, citant 5 groupes ; **3 d'entre eux existent** sur le
+boîtier, les 2 autres non. Simulation cochée.
+*Actions* : lancer ; lire l'étiquette de la barre à la fin ; si la trace des commandes du
+firewall est consultable, y compter les `USER GROUP SHOW`.
+*Attendu* : l'étiquette finit sur « **7 / 7** », soit `4 + 3`. **Pas 9** — ce serait un
+`USER GROUP SHOW` par groupe cité, absents compris, alors qu'un groupe à créer n'a pas de
+membre à lire. **Pas 4** — ce serait la v1, qui ne lisait aucune adhésion. Côté boîtier,
+exactement **trois** `USER GROUP SHOW`, un par groupe présent, portant chacun la graphie du
+boîtier. À défaut de trace consultable, l'étiquette de la barre suffit à trancher.
+*Verdict* : OK / KO —
+
+**132 — Arrêt pendant la lecture des adhésions** · boîtier : oui
+*Objectif* : la lecture n'est plus l'affaire de quatre commandes ; c'est désormais la phase la
+plus longue d'un lot, et le bouton *Arrêter* doit y répondre. Un arrêt qui y tombe n'a
+construit aucun plan, et le bilan ne doit rien prétendre de ce qui restait à créer.
+*Départ* : un CSV citant **de nombreux groupes déjà présents** sur le boîtier — au moins dix,
+créés au préalable — pour que la phase dure quelques secondes. **Simulation décochée.** Relever
+la liste des comptes et des groupes avant. **Noter NJ si le moment ne peut pas être visé.**
+*Actions* : cliquer *Lancer*, puis *Arrêter* **pendant la lecture**, avant que le plan ne
+s'affiche.
+*Attendu* : au clic, le journal porte la ligne du cas 115, puis « **arrêt demandé pendant la
+lecture de l'état du firewall : aucun plan n'a été construit, aucun compte n'a été entamé, rien
+n'a été écrit. Relancer est sans danger : le lot repartira de la première lecture.** »
+**Aucun plan n'est affiché** : ni ligne « … : à créer », ni « Groupes à créer », ni ligne
+d'orphelins. La boîte « Écrire sur le firewall » **ne s'ouvre pas**. Le bilan final est
+exactement, dans cet ordre : « **Arrêt demandé.** », « **Le lot s'est arrêté pendant la lecture
+de l'état du firewall : aucun plan n'a été construit.** », « **Rien n'a été écrit sur le
+firewall.** », « **Relancez quand vous voulez : le lot repartira de la première lecture.** ».
+**Vérifier expressément qu'il ne s'affiche pas « Aucun compte ne restait à créer. »** alors que
+le CSV en portait : c'est le défaut que la v2 corrige. Le boîtier relu est **strictement
+identique** à son état de départ.
+*Verdict* : OK / KO / NJ —
+
+**133 — Idempotence : seconde exécution sans aucune écriture** · boîtier : oui
+*Objectif* : **le verdict d'ensemble de la v2.** Rejouer un lot sur un boîtier déjà à jour ne
+doit rien écrire du tout. C'est l'invariant du projet, et c'est la seule vérification de bout
+en bout de l'hypothèse sur la forme des DN.
+*Départ* : le boîtier laissé par le cas 49 — 3 comptes, 2 groupes, rattachements posés. Relever
+la date de dernière modification de chaque compte et de chaque groupe, et la liste des membres
+des deux groupes.
+*Actions* : rejouer le **même** `lot-nominal.csv` en lot réel, **deux fois de suite**, en
+confirmant à chaque fois ; relire après chaque passage.
+*Attendu*, aux deux passages :
+- tous les comptes sont annoncés « **présent — rien à faire** », aucun « ajouté à » ;
+- la boîte de confirmation annonce « **0 compte à créer, 0 groupe neuf.** » puis
+  « **0 adhésion à ajouter.** » ;
+- **aucune commande d'écriture ne part** — ni `USER CREATE`, ni `USER PASSWORD`, ni
+  `USER GROUP CREATE`, ni `USER GROUP ADDUSER` ;
+- **la ligne des membres non rattachés reste absente** (cas 122) ;
+- les dates de dernière modification sont **inchangées** et les membres des deux groupes
+  identiques au relevé.
+*Le KO caractéristique, et il est silencieux sans ce cas* : le second lot annonce des adhésions
+à ajouter et réémet des `USER GROUP ADDUSER` que le boîtier absorbe sans broncher. Le lot
+« réussit » alors à chaque exécution tout en n'étant pas idempotent, et le rapport final ne
+dit rien d'anormal. C'est exactement ce que la forme des membres rendus par `USER GROUP SHOW`
+décide, et rien d'autre ne le révèle.
+*Verdict* : OK / KO —
+
+**134 — Le mot de passe d'un compte existant n'est jamais touché** · boîtier : oui
+*Objectif* : un compte déjà présent ne reçoit **aucun** mot de passe. Ce n'est pas une règle
+que l'outil s'applique, c'est un chemin de code qu'il ne traverse pas.
+*Départ* : un compte de maquette **existant**, dont le mot de passe est connu — le noter
+**hors de ce cahier**. Il figure dans le CSV, avec un groupe qu'il n'a pas encore.
+*Actions* : vérifier d'abord que ce mot de passe ouvre bien une session sur le boîtier ; lancer
+le lot réel ; réessayer la même connexion ; enregistrer puis ouvrir le CSV des mots de passe.
+*Attendu* : le mot de passe d'origine **fonctionne toujours** après le lot. Le journal ne porte
+pour ce compte que « présent — ajouté à … », **jamais** « créé ». Le rapport ne le compte pas
+parmi les comptes créés, et il **ne figure pas** dans le CSV exporté, qui ne porte que les
+comptes réellement créés par ce lot.
+*Verdict* : OK / KO —
+
+**135 — La confirmation annonce les adhésions** · boîtier : oui
+*Objectif* : la boîte de confirmation est le seul endroit où l'opérateur voit l'ampleur de ce
+qui va être posé sur des comptes **qu'il n'a pas créés**. Elle doit le chiffrer.
+*Départ* : un CSV mêlant comptes à créer et comptes déjà présents, dont au moins un groupe
+neuf, sur un boîtier peuplé. Compter dans le journal les adhésions que le plan énumère — chaque
+groupe cité par une ligne « rattaché à … » ou « ajouté à … » comptant pour une.
+*Actions* : décocher Simulation, lancer, **lire la boîte sans répondre**, comparer au journal,
+puis répondre.
+*Attendu* : la boîte « Écrire sur le firewall » nomme l'hôte — « **Ce lot va écrire sur le
+firewall <hôte>.** » —, puis annonce « **N comptes à créer, M groupes neufs.** » et, sur sa
+propre ligne, « **P adhésions à ajouter.** », où **P vaut exactement** le nombre d'adhésions
+énumérées par le journal. Elle liste « Groupes à créer : … (n membres) », signale le cas
+échéant qu'un groupe neuf n'aurait qu'un seul membre, et se termine par « **Cet outil n'enlève
+rien : aucun compte supprimé ni désactivé, aucune appartenance de groupe retirée.** » puis
+« **Écrire maintenant ?** ». Le bouton par défaut est *Non*. Vérifier l'accord au singulier sur
+un lot n'apportant qu'une seule adhésion : « **1 adhésion à ajouter.** ».
+*Verdict* : OK / KO —
+
+**136 — `USER GROUP ADDUSER` refusé** · boîtier : oui
+*Objectif* : une adhésion refusée est un échec isolé — elle ne rend pas un compte inutilisable
+et n'arrête pas le lot.
+*Départ* : provoquer un refus de rattachement. Voie proposée : créer depuis l'interface web un
+groupe dont le nom porte un guillemet double (`compta"bis`), puis le citer avec
+`lot-groupe-guillemet.csv` — le groupe **existant**, aucune création n'est tentée et c'est
+l'`ADDUSER` qui est refusé. Toute autre provocation d'un refus convient. **Noter NJ si aucun
+refus ne peut être provoqué.**
+*Actions* : lancer un lot réel ; lire le journal et le rapport ; relire le boîtier.
+*Attendu* : le journal porte « **<identifiant> : non rattaché à <groupe> (…)** » et le rapport
+inscrit « <identifiant> — **USER GROUP ADDUSER** : … ». **Le lot se poursuit** : les comptes
+suivants sont créés et rattachés normalement, et le rapport final compte cet échec sans que le
+lot soit interrompu. Le refus n'apparaît **qu'une seule fois** au rapport — aucun réessai
+dédié n'a lieu.
+*Verdict* : OK / KO / NJ —
+
+**137 — Reprise après coupure pendant les rattachements** · boîtier : oui
+*Objectif* : la v2 relit l'inventaire des adhésions après une reconnexion. Les rattachements
+déjà posés ne doivent pas repartir, les manquants doivent être replanifiés, et le rapport ne
+doit compter aucun doublon.
+*Départ* : un CSV donnant **plusieurs groupes au même compte**, tous présents sur le boîtier ;
+lot réel en cours. **Noter NJ si le moment ne peut pas être visé.**
+*Actions* : couper la liaison **entre deux `USER GROUP ADDUSER` du même compte**, après qu'au
+moins un rattachement soit passé ; rebrancher dans les cinq secondes ; laisser le lot aller à
+son terme ; relire les membres de chaque groupe, puis le rapport.
+*Attendu* : le journal porte « <identifiant> : **coupure réseau pendant le rattachement :
+groupes non rattachés (<liste>), ils seront replanifiés après reconnexion** », puis
+« reconnecté à la tentative n », puis **un nouveau plan réaffiché en entier**. Ce nouveau plan
+**ne redemande pas** les rattachements déjà posés — l'inventaire des adhésions a été relu — et
+redemande **ceux qui manquent**. À la fin : chaque groupe porte ce compte **une seule fois**,
+tous les rattachements du CSV sont posés, et **la même paire compte/groupe ne figure pas deux
+fois au rapport**.
+*Verdict* : OK / KO / NJ —
+
+**138 — Collision de casse entre deux comptes** · boîtier : oui
+*Objectif* : deux comptes que la clé de rapprochement confond ne se tranchent pas au hasard —
+l'ordre dans lequel le boîtier rend sa liste n'est garanti par rien, et trancher sur le premier
+ferait écrire sur un compte différent d'une exécution à l'autre.
+*Départ* : créer depuis l'interface web `Jean.Dupont` **et** `JEAN.DUPONT` ; un CSV portant
+`jean.dupont` avec un groupe, plus au moins une autre ligne valide. **Si le boîtier refuse la
+seconde graphie, noter NJ et consigner le refus** : la sensibilité à la casse des `uid` est
+alors tranchée dans l'autre sens — l'ambiguïté ne peut pas se produire, et le traitement prévu
+est un filet sans emploi.
+*Actions* : lancer en simulation, puis en lot réel ; relire les deux comptes, leurs attributs
+et leurs appartenances.
+*Attendu* : le journal porte « **compte jean.dupont : le boîtier en porte 2 graphies
+(JEAN.DUPONT, Jean.Dupont) — rien ne lui sera fait, le doublon se lève à la main sur le
+boîtier.** », les graphies triées par ordre alphabétique. **Rien n'est fait à ce compte** : ni
+création — aucun `jean.dupont` n'apparaît —, ni adhésion — aucune des deux graphies n'a reçu de
+groupe —, ni mot de passe. Les deux graphies sont **intactes**, date de dernière modification
+comprise. **Le lot continue** : les autres lignes sont traitées normalement. Ce compte n'est pas
+non plus compté parmi les orphelins — sa ligne figure bel et bien dans le fichier.
+*Verdict* : OK / KO / NJ —
+
+**139 — Collision de comptes levée par une correspondance exacte** · boîtier : oui
+*Objectif* : comme pour les groupes, la correspondance exacte l'emporte sur l'ambiguïté.
+*Départ* : le boîtier porte `Jean.Dupont` **et** `jean.dupont` ; CSV portant `jean.dupont` avec
+un groupe qu'il n'a pas. C'est le seul cas de figure possible : l'identifiant du fichier est
+**toujours** en minuscules, l'outil l'y bascule à la lecture (cas 28). **Même NJ qu'au cas 138
+si le boîtier refuse la seconde graphie.**
+*Actions* : lancer en simulation, puis en lot réel ; relire les deux comptes et leurs
+appartenances.
+*Attendu* : **aucun signalement d'ambiguïté** — la ligne « le boîtier en porte 2 graphies »
+n'apparaît pas. C'est **`jean.dupont`** qui est visé, et lui seul : il reçoit ses adhésions
+manquantes, `Jean.Dupont` est **intact**, date de dernière modification comprise. **Aucun compte
+n'est créé.**
+*Verdict* : OK / KO / NJ —
 
 ---
 
@@ -1384,10 +1791,11 @@ compte créé avant l'arrêt**.
 | P — Compléments de la revue finale | 110 – 112 | **oui** |
 | Q — Arrêt d'un lot en cours | 114 – 121 | **oui** |
 | Q — Arrêt d'un lot en cours | 113 | non |
+| R — Boîtier déjà peuplé (v2) | 122 – 139 | **oui** |
 
 **22 cas sans boîtier** : 1 à 18, 79, 87, 104 et 113. Ils se jouent dès qu'un poste Windows et
 le `.exe` sont disponibles, sans attendre la maquette.
-**99 cas exigeant un boîtier** : tous les autres. **121 cas au total.**
+**117 cas exigeant un boîtier** : tous les autres. **139 cas au total.**
 
 ## Traçabilité
 
@@ -1439,6 +1847,19 @@ bilan dédié et le gel de la barre → cas **116** ; le bouton en simulation �
 l'arrêt avant la confirmation d'écriture → cas **120** ; relancer sans rien créer deux fois →
 cas **118** ; les mots de passe des comptes créés toujours enregistrables → cas **121**.
 
+**La spécification v2** (« Boîtier déjà peuplé ») → cas de ce cahier : la casse des comptes →
+cas **125** ; la casse des groupes → cas **128** ; la collision de graphies de groupes → cas
+**129** et **130** ; la collision de graphies de comptes → cas **138** et **139** ; la colonne
+`groupes` vide sur un compte présent → cas **127** ; le compteur des membres non rattachés →
+cas **122** ; la lecture à `4 + g` commandes → cas **131**, et son effet sur la barre → cas
+**23** et **56** ; l'arrêt entre deux lectures d'inventaire → cas **132** ; l'idempotence de
+bout en bout → cas **133**, adossé aux cas **51** et **52** ; le mot de passe d'un compte
+existant structurellement hors d'atteinte → cas **134** ; la confirmation enrichie des
+adhésions → cas **135** ; l'échec isolé d'un rattachement → cas **136** ; la reprise après
+coupure pendant les rattachements → cas **137** ; les hypothèses de l'adaptateur SDK sur
+`USER GROUP SHOW` — syntaxe du mot-clé `group=`, section `[Group]`, champs `member=`,
+`member_2=` et groupe sans membre → cas **123** et **124**.
+
 ### Points devenus caducs
 
 Trois points de la liste héritée ne décrivent plus le produit et **ne sont volontairement pas
@@ -1464,6 +1885,27 @@ Un quatrième point a changé de nature : **« Longueur saisie non numérique »
 peut plus être joué sans boîtier. Les champs de politique restent grisés tant qu'aucune
 lecture n'a eu lieu, et l'outil n'utilise alors même pas leur valeur : le cas **45** exige
 donc une lecture préalable, donc un boîtier.
+
+### Attendus de la v1 corrigés par la v2
+
+Ces cas gardent leur numéro et leur intitulé ; **seul leur *Attendu* a changé**, et il porte la
+mention *(v2)*. Un cahier v2 séparé aurait laissé un cahier v1 mensonger à côté de lui.
+
+| Cas | Motif de la correction |
+|---|---|
+| **23** | la lecture ne vaut plus quatre commandes mais `4 + g`, un `USER GROUP SHOW` par groupe cité et déjà présent |
+| **26** | le groupe réclamé par un compte déjà présent **est** créé, et le compte y est rattaché : les groupes à créer se calculent sur toutes les adhésions du plan |
+| **27** | les orphelins ne sont plus nommés mais **comptés**, en une seule ligne — une liste de 500 noms noyait le plan |
+| **35** | « déjà présent, ignoré » n'existe plus : un compte présent est « présent — rien à faire » ou « présent — ajouté à … », et les orphelins se lisent en nombre |
+| **50** | « exactement les groupes du CSV » n'est plus exigible : l'outil n'enlève rien, une adhésion préexistante hors CSV subsiste — « **au moins** » |
+| **51** | trois comptes « présent — rien à faire », zéro écriture, barre `4 + g` : la boîte de confirmation s'ouvre même sur un plan vide |
+| **52** | même correction que le cas 51, sur l'autre poste |
+| **56** | le total vaut `4 + g` lectures + 1 par groupe neuf + 2 par compte à créer + 1 par adhésion, et il **croît une seule fois**, juste après la confirmation |
+| **70** | l'avertissement de perte ne parle plus de compte « ignoré » : les comptes « seront vus comme déjà présents et ne recevront plus que leurs adhésions manquantes » |
+| **83** | les comptes déjà créés sont vus comme présents, avec leurs adhésions manquantes éventuellement posées |
+| **115** | la ligne écrite au clic ne promet plus « le compte en cours » : elle part sans connaître la phase, et un arrêt pendant la lecture n'entame aucun compte |
+| **118** | même correction que le cas 83 ; la promesse du bilan — « relancer est sans danger » — reste ce que le cas vérifie |
+| **119** | la fenêtre d'arrêt vaut `4 + g` commandes, et le clic pendant la lecture des adhésions est un point d'arrêt à part entière, joué au cas **132** |
 
 ## Nettoyage après recette
 
