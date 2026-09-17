@@ -124,6 +124,33 @@ def commande_ajouter_membre(groupe: str, identifiant: str) -> str:
     return f"USER GROUP ADDUSER {_entre_guillemets(groupe)} {identifiant}"
 
 
+# Champs répétés d'une section [Group] : `member`, `member_2`, `member_3`, … La forme
+# exacte n'est pas prouvée (spec v2, « Points non vérifiés », point 1) ; un champ qui ne
+# répond pas à ce motif n'est pas un membre et n'est pas lu. `\Z` et non `$` : ce dernier
+# accepte aussi un saut de ligne final, que `member\n` ne devrait pas satisfaire.
+_MOTIF_MEMBRE = re.compile(r"^member(?:_(\d+))?\Z", re.IGNORECASE)
+
+
+def commande_lister_membres(groupe: str) -> str:
+    """Le groupe est cité comme partout ailleurs, et l'identité transmise est celle que
+    `USER GROUP LIST` a rendue, verbatim."""
+    return f"USER GROUP SHOW group={_entre_guillemets(groupe)}"
+
+
+def lire_membres(jetons: Mapping[str, Any]) -> list[str]:
+    """Les DN des membres, dans l'ordre des indices. Section sans membre : liste vide.
+    Une valeur absente (`None`) est écartée avant conversion en chaîne : `str(None)` vaut
+    le texte « None », que la vérification de vacuité qui suit ne rejette pas."""
+    trouves: list[tuple[int, str]] = []
+    for nom, valeur in jetons.items():
+        correspondance = _MOTIF_MEMBRE.match(str(nom))
+        if correspondance is None or valeur is None or not str(valeur).strip():
+            continue
+        indice = int(correspondance.group(1) or 1)
+        trouves.append((indice, str(valeur).strip()))
+    return [dn for _, dn in sorted(trouves)]
+
+
 # `CONFIG PASSWDPOLICY SHOW` ne rend pas un nombre de classes de caractères mais un
 # mot-clé : la documentation SNS donne MinSetOfChars=<None|AlphaNum|AlphaSpecial>. La
 # correspondance vers un nombre de classes est une hypothèse, à confirmer au premier
@@ -377,3 +404,10 @@ class BoitierSDK:
 
     def ajouter_membre(self, groupe: str, identifiant: str) -> None:
         self._envoyer(commande_ajouter_membre(groupe, identifiant))
+
+    def lister_membres(self, groupe: str) -> list[str]:
+        # ErreurCommande n'est pas absorbée ici : un refus est signalé et traité par
+        # l'appelant, qui le journalise et poursuit. L'absorber ici rendrait un refus réel
+        # indiscernable d'un groupe vide.
+        reponse = self._envoyer(commande_lister_membres(groupe))
+        return lire_membres(_section_unique(reponse))
