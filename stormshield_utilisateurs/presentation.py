@@ -33,7 +33,9 @@ from stormshield_utilisateurs.execution import (
     jamais_arrete,
 )
 from stormshield_utilisateurs.modele import (
+    CompteAmbigu,
     CompteCree,
+    GroupeAmbigu,
     MotifArret,
     Plan,
     PlancherPolitique,
@@ -106,7 +108,8 @@ class DemandeArret:
 
 
 ARRET_DEMANDE_AU_CLIC = (
-    "Arrêt demandé : le compte en cours va d'abord à son terme, puis le lot s'arrête."
+    "Arrêt demandé : le lot s'arrête dès que l'opération en cours est allée à son "
+    "terme — une lecture pendant l'inventaire, un compte entamé pendant l'écriture."
 )
 """Écrite au journal dès le clic, et non à l'arrêt effectif.
 
@@ -114,6 +117,11 @@ Entre les deux il peut s'écouler une quinzaine de secondes — trois essais de 
 passe à deux secondes, une reconnexion — pendant lesquelles des comptes continuent de
 défiler. Sans cette ligne, rien ne distingue une demande prise en compte d'un clic
 perdu, et l'opérateur qui doute reclique ou ferme la fenêtre.
+
+Elle part du clic, donc sans connaître la phase : elle ne peut promettre aucun compte
+en cours. Un arrêt tombé pendant la lecture d'inventaire — la phase la plus longue —
+n'en a entamé aucun, et le bilan dira qu'aucun plan n'a été construit. Le journal se
+contredirait.
 """
 
 
@@ -420,8 +428,10 @@ def libelle_plancher(plancher: PlancherPolitique) -> str:
 def reglage_barre(progression: Progression) -> tuple[int, int]:
     """Rend le couple (maximum, valeur) de la barre.
 
-    Le total ne croît jamais : un plan reconstruit après reconnexion ne peut que le
-    réduire, et la barre doit suivre à la baisse plutôt que viser un total qu'aucune
+    Le total ne croît qu'une seule fois, à la confirmation de l'écriture : la lecture
+    seule n'annonce que ses propres opérations, et le plan accepté ajoute les siennes.
+    Ensuite il ne peut plus que se réduire — un plan reconstruit après reconnexion
+    en retire —, et la barre doit suivre à la baisse plutôt que viser un total qu'aucune
     opération restante ne peut plus atteindre. Elle gèle sous son total sur un arrêt :
     c'est `rapport.interrompu`, jamais la barre, qui dit si le lot est allé au bout.
     """
@@ -478,7 +488,8 @@ class ComptesEnregistrables:
 
     Porte aussi le seul fait qui distingue un secret perdu d'un secret sauvé : ces mots
     de passe n'existent que dans la mémoire du processus. Les comptes, eux, existent sur
-    le boîtier et un relancement les classera « déjà présent, ignoré » à jamais.
+    le boîtier : un relancement les verra comme déjà présents et ne leur redonnera plus
+    que leurs adhésions manquantes, jamais un mot de passe.
     """
 
     def __init__(self) -> None:
@@ -543,14 +554,27 @@ def avertissement_perte_de_secrets(nombre: int) -> str:
     """Ce que l'opérateur doit lire avant qu'un nouveau lot efface des secrets.
 
     Aucun relancement ne les reconstitue : les comptes existent déjà sur le boîtier, le
-    plan suivant les classera « déjà présent, ignoré » et ils resteront sans mot de
-    passe connu.
+    plan suivant les verra comme déjà présents et ils resteront sans mot de passe connu.
+
+    La phrase entière s'accorde, et pas seulement son premier membre : un avertissement
+    mal accordé est un avertissement qu'on croit moins, et celui-ci porte des secrets
+    qu'aucun relancement ne recrée.
     """
+    if nombre <= 1:
+        corps = (
+            "Lancer un nouveau lot l'efface définitivement. Le compte, lui, reste créé "
+            "sur le firewall : aucun relancement ne lui redonnera de mot de passe, il "
+            "sera vu comme déjà présent et ne recevra plus que ses adhésions manquantes."
+        )
+    else:
+        corps = (
+            "Lancer un nouveau lot les efface définitivement. Les comptes, eux, restent "
+            "créés sur le firewall : aucun relancement ne leur redonnera de mot de "
+            "passe, ils seront vus comme déjà présents et ne recevront plus que leurs "
+            "adhésions manquantes."
+        )
     return (
-        f"{_secrets_en_souffrance(nombre)} dans un fichier.\n\n"
-        "Lancer un nouveau lot les efface définitivement. Les comptes, eux, restent "
-        "créés sur le firewall : aucun relancement ne leur redonnera de mot de passe, "
-        "ils seront classés « déjà présent, ignoré ».\n\n"
+        f"{_secrets_en_souffrance(nombre)} dans un fichier.\n\n{corps}\n\n"
         "Lancer quand même ?"
     )
 
@@ -591,8 +615,47 @@ def _ligne_des_orphelins(nombre: int) -> str:
     )
 
 
+def _ligne_des_non_rattaches(nombre: int) -> str:
+    """Le canari de l'hypothèse sur la forme du DN. N'arrête rien, ne refuse rien, ne
+    retire aucune écriture : il informe, il n'intervient pas."""
+    if nombre == 1:
+        return (
+            "1 membre de groupe n'a pas pu être reconnu : l'adhésion correspondante "
+            "sera renvoyée à chaque exécution."
+        )
+    return (
+        f"{nombre} membres de groupes n'ont pas pu être reconnus : les adhésions "
+        "correspondantes seront renvoyées à chaque exécution."
+    )
+
+
+def _ligne_du_groupe_ambigu(ambigu: GroupeAmbigu) -> str:
+    graphies = ", ".join(ambigu.graphies)
+    return (
+        f"groupe {ambigu.nom_fichier} : le boîtier en porte "
+        f"{_accord(len(ambigu.graphies), 'graphie')} ({graphies}) — aucun compte n'y "
+        "sera rattaché, le doublon se lève à la main sur le boîtier."
+    )
+
+
+def _ligne_du_compte_ambigu(ambigu: CompteAmbigu) -> str:
+    """Même signalement que pour un groupe, et même conséquence : l'outil ne tranche pas
+    ce que le boîtier n'a pas tranché, et le lot continue sans ce compte."""
+    graphies = ", ".join(ambigu.graphies)
+    return (
+        f"compte {ambigu.identifiant_fichier} : le boîtier en porte "
+        f"{_accord(len(ambigu.graphies), 'graphie')} ({graphies}) — rien ne lui sera "
+        "fait, le doublon se lève à la main sur le boîtier."
+    )
+
+
 def lignes_du_plan(plan: Plan) -> list[str]:
-    """Plan de rapprochement. Réécrit tel quel après une reconnexion, sur le plan reconstruit."""
+    """Plan de rapprochement. Réécrit tel quel après une reconnexion, sur le plan reconstruit.
+
+    Les deux compteurs de queue ne s'écrivent que s'ils ne sont pas nuls : « 0 compte du
+    boîtier ne figure pas dans le fichier » est du bruit au-dessus de ce sur quoi
+    l'opérateur doit se prononcer, et un journal sans cette ligne dit déjà zéro.
+    """
     lignes: list[str] = []
     if plan.groupes_a_creer:
         details = ", ".join(
@@ -601,8 +664,12 @@ def lignes_du_plan(plan: Plan) -> list[str]:
         )
         lignes.append(f"Groupes à créer : {details}")
     lignes.extend(_ligne_du_travail(travail) for travail in plan.travaux)
+    lignes.extend(_ligne_du_groupe_ambigu(ambigu) for ambigu in plan.groupes_ambigus)
+    lignes.extend(_ligne_du_compte_ambigu(ambigu) for ambigu in plan.comptes_ambigus)
     if plan.nombre_orphelins:
         lignes.append(_ligne_des_orphelins(plan.nombre_orphelins))
+    if plan.nombre_membres_non_rattaches:
+        lignes.append(_ligne_des_non_rattaches(plan.nombre_membres_non_rattaches))
     return lignes
 
 
@@ -627,6 +694,7 @@ def texte_de_confirmation_du_lot(hote: str, plan: Plan) -> str:
         f"Ce lot va écrire sur le firewall {hote}.",
         f"{_accord(len(plan.creations), 'compte à créer', 'comptes à créer')}, "
         f"{_accord(len(plan.groupes_a_creer), 'groupe neuf', 'groupes neufs')}.",
+        f"{_accord(plan.nombre_adhesions, 'adhésion à ajouter', 'adhésions à ajouter')}.",
     ]
     if plan.groupes_a_creer:
         details = ", ".join(
@@ -646,8 +714,9 @@ def texte_de_confirmation_du_lot(hote: str, plan: Plan) -> str:
             "d'une coquille de saisie dans la colonne des groupes."
         )
     parties.append(
-        "Rien n'a encore été écrit sur le firewall. Ce qui sera créé restera créé : "
-        "cet outil ne supprime rien.\n\nÉcrire maintenant ?"
+        "Rien n'a encore été écrit sur le firewall. Cet outil n'enlève rien : aucun "
+        "compte supprimé ni désactivé, aucune appartenance de groupe retirée."
+        "\n\nÉcrire maintenant ?"
     )
     return "\n\n".join(parties)
 
@@ -694,6 +763,17 @@ def _lignes_d_un_arret_demande(rapport: Rapport) -> list[str]:
     Forme à part, et non une conduite à tenir de plus : l'opérateur qui vient de cliquer
     sait déjà pourquoi le lot s'arrête. Ce qu'il ignore, c'est où le lot en était.
     """
+    if not rapport.plan_construit:
+        # Arrêt tombé pendant la lecture d'inventaire : rien n'a été compté, donc rien
+        # ne peut être dit de ce qui restait à créer. « Aucun compte ne restait à
+        # créer » se lirait comme « le fichier n'apportait rien », ce qui est faux.
+        return [
+            "Arrêt demandé.",
+            "Le lot s'est arrêté pendant la lecture de l'état du firewall : aucun plan "
+            "n'a été construit.",
+            "Rien n'a été écrit sur le firewall.",
+            "Relancez quand vous voulez : le lot repartira de la première lecture.",
+        ]
     crees = len(rapport.comptes_crees)
     restants = max(rapport.comptes_prevus - crees, 0)
     # Trois formes, pas deux : zéro compte créé est le cas le plus fréquent d'un arrêt
