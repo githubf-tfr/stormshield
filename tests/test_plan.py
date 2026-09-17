@@ -196,6 +196,13 @@ def test_seuls_les_groupes_cites_et_presents_sont_interroges() -> None:
     assert groupes_a_interroger(("compta", "neuf", "doublon"), index) == ("Compta",)
 
 
+def test_un_groupe_ambigu_leve_par_une_correspondance_exacte_est_interroge() -> None:
+    """La contrepartie du test précédent : `doublon` existe tel quel sur le boîtier, il
+    n'y a rien à deviner, et lire ses membres évite un ADDUSER redondant."""
+    index = IndexBoitier.depuis(("Doublon", "doublon"))
+    assert groupes_a_interroger(("doublon",), index) == ("doublon",)
+
+
 def test_une_ligne_a_colonne_vide_ne_cite_aucun_groupe() -> None:
     """Le majorant de la phase de lecture ne compte que ce que le fichier décrit ; les
     lignes rejetées, elles, n'arrivent pas jusqu'ici."""
