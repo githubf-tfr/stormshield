@@ -432,6 +432,10 @@ def executer(
             # Deux faits distincts : combien de comptes étaient prévus, et qu'il y ait
             # eu un plan du tout. Un arrêt tombé plus haut n'a ni l'un ni l'autre.
             rapport.plan_construit = True
+            # Figées ici pour la même raison : c'est l'état lu au moment où l'opérateur
+            # décide, et ces comptes-là ne recevront rien du lot.
+            rapport.nombre_comptes_ambigus = len(plan_courant.comptes_ambigus)
+            rapport.nombre_groupes_ambigus = len(plan_courant.groupes_ambigus)
             emettre(PlanPret(plan_courant))
             # Seul point d'arrêt d'une simulation, qui n'a rien à écrire ensuite ; en
             # lot réel il évite de poser une question sur un lot déjà arrêté.

@@ -673,6 +673,52 @@ def lignes_du_plan(plan: Plan) -> list[str]:
     return lignes
 
 
+_MOTIF_DE_L_AMBIGUITE = (
+    "le boîtier en porte plusieurs graphies que seule la casse distingue"
+)
+
+
+def _phrases_des_ambiguites(
+    nombre_comptes: int, nombre_groupes: int, *, revolu: bool
+) -> list[str]:
+    """Ce qui ne recevra rien du lot — ou n'a rien reçu, une fois le lot fini.
+
+    Le plan les nomme une par une, mais sur deux cents lignes ces lignes-là sont noyées :
+    un compte ambigu ne reçoit ni création, ni adhésion, ni mot de passe, et c'est
+    précisément la situation que la v2 existe pour traiter. Des nombres, jamais des
+    noms — le détail est au journal, à sa place.
+
+    `revolu` choisit le temps : l'opérateur décide sur la boîte de confirmation, où rien
+    n'est encore joué, et rend compte sur le bilan final, où tout l'est.
+    """
+    phrases: list[str] = []
+    if nombre_comptes:
+        phrases.append(
+            _accord(
+                nombre_comptes,
+                "compte du fichier n'a rien reçu"
+                if revolu
+                else "compte du fichier ne recevra rien",
+                "comptes du fichier n'ont rien reçu"
+                if revolu
+                else "comptes du fichier ne recevront rien",
+            )
+        )
+    if nombre_groupes:
+        phrases.append(
+            _accord(
+                nombre_groupes,
+                "groupe du fichier n'a été touché pour aucun compte"
+                if revolu
+                else "groupe du fichier ne sera touché pour aucun compte",
+                "groupes du fichier n'ont été touchés pour aucun compte"
+                if revolu
+                else "groupes du fichier ne seront touchés pour aucun compte",
+            )
+        )
+    return phrases
+
+
 def _groupes_a_un_seul_membre(plan: Plan) -> tuple[str, ...]:
     return tuple(groupe.nom for groupe in plan.groupes_a_creer if groupe.nombre_membres == 1)
 
@@ -712,6 +758,16 @@ def texte_de_confirmation_du_lot(hote: str, plan: Plan) -> str:
         parties.append(
             f"{sujet} ({', '.join(solitaires)}) : c'est le plus souvent la signature "
             "d'une coquille de saisie dans la colonne des groupes."
+        )
+    ambiguites = _phrases_des_ambiguites(
+        len(plan.comptes_ambigus), len(plan.groupes_ambigus), revolu=False
+    )
+    if ambiguites:
+        parties.append(
+            " ; ".join(ambiguites)
+            + f". {_MOTIF_DE_L_AMBIGUITE.capitalize()}, et l'outil ne tranche pas ce "
+            "que le boîtier n'a pas tranché. Le détail est dans le journal ; le doublon "
+            "ne se lève qu'à la main, sur le boîtier."
         )
     parties.append(
         "Rien n'a encore été écrit sur le firewall. Cet outil n'enlève rien : aucun "
@@ -821,6 +877,15 @@ def lignes_du_rapport(rapport: Rapport) -> list[str]:
             if rapport.interrompu
             else f"Terminé : {resume}"
         ]
+    # Avant le détail des échecs, et dans les trois fins possibles : un compte ambigu
+    # n'a rien reçu du tout — ni création, ni adhésion, ni mot de passe — et n'est
+    # compté comme échec nulle part. Le bilan est ce sur quoi l'opérateur rend compte.
+    lignes.extend(
+        f"{phrase} : {_MOTIF_DE_L_AMBIGUITE}, le détail est dans le journal."
+        for phrase in _phrases_des_ambiguites(
+            rapport.nombre_comptes_ambigus, rapport.nombre_groupes_ambigus, revolu=True
+        )
+    )
     lignes.extend(f"{echec.identifiant} — {echec.operation} : {echec.motif}"
                   for echec in rapport.echecs)
     sans_secret = rapport.sans_mot_de_passe

@@ -987,6 +987,45 @@ def test_une_seule_adhesion_s_annonce_au_singulier() -> None:
     assert "1 adhésion à ajouter." in texte_de_confirmation_du_lot("10.0.0.1", plan)
 
 
+def test_la_confirmation_annonce_les_comptes_et_les_groupes_ambigus() -> None:
+    """La boîte annonçait « 1 compte à créer, 1 adhésion à ajouter » pendant qu'un second
+    compte du fichier ne recevait rien du tout. C'est la situation que la v2 existe pour
+    traiter, et c'est sur cette boîte que l'opérateur décide : sur deux cents lignes,
+    l'unique ligne de plan qui le signale est noyée."""
+    plan = replace(
+        _plan(_travail("dupont")),
+        comptes_ambigus=(CompteAmbigu("jean.dupont", ("Jean.Dupont", "JEAN.DUPONT")),),
+        groupes_ambigus=(GroupeAmbigu("compta", ("Compta", "COMPTA")),),
+    )
+    texte = texte_de_confirmation_du_lot("firewall.local", plan)
+    assert "1 compte du fichier ne recevra rien" in texte
+    assert "1 groupe du fichier ne sera touché pour aucun compte" in texte
+
+
+def test_la_confirmation_accorde_le_signalement_des_ambiguites() -> None:
+    plan = replace(
+        _plan(_travail("dupont")),
+        comptes_ambigus=(
+            CompteAmbigu("jean.dupont", ("Jean.Dupont", "JEAN.DUPONT")),
+            CompteAmbigu("legrand", ("Legrand", "LEGRAND")),
+        ),
+        groupes_ambigus=(
+            GroupeAmbigu("compta", ("Compta", "COMPTA")),
+            GroupeAmbigu("rh", ("Rh", "RH")),
+        ),
+    )
+    texte = texte_de_confirmation_du_lot("firewall.local", plan)
+    assert "2 comptes du fichier ne recevront rien" in texte
+    assert "2 groupes du fichier ne seront touchés pour aucun compte" in texte
+
+
+def test_la_confirmation_sans_ambiguite_n_en_parle_pas() -> None:
+    """Un signalement qui s'écrit pour rien perd le crédit dont il vit."""
+    texte = texte_de_confirmation_du_lot("firewall.local", _plan(_travail("dupont")))
+    assert "ne recevra rien" not in texte
+    assert "touché pour aucun compte" not in texte
+
+
 def test_la_demande_porte_son_texte_et_debloque_le_fil_sur_la_reponse() -> None:
     """Seul message à circuler dans les deux sens : le fil ne peut pas ouvrir de boîte de
     dialogue, la fenêtre ne peut pas décider à la place de l'opérateur."""
@@ -1063,6 +1102,41 @@ def test_le_rapport_resume_puis_detaille_les_echecs() -> None:
         "Terminé : 1 compte créé, 1 groupe créé, 1 échec.",
         "martin — USER CREATE : refusé",
     ]
+
+
+def test_le_rapport_final_compte_les_comptes_et_les_groupes_ambigus() -> None:
+    """Le bilan disait « 0 échec » alors qu'un compte du fichier n'avait rien reçu — ni
+    création, ni adhésion, ni mot de passe. Un compte qui n'a rien reçu du tout n'était
+    compté nulle part : l'opérateur rend compte sur ce bilan, il doit y lire ce qui est
+    resté au bord du chemin."""
+    rapport = Rapport(
+        comptes_crees=[CompteCree("dupont", "s3cr3t")],
+        nombre_comptes_ambigus=1,
+        nombre_groupes_ambigus=2,
+    )
+    assert lignes_du_rapport(rapport) == [
+        "Terminé : 1 compte créé, 0 groupe créé, 0 échec.",
+        "1 compte du fichier n'a rien reçu : le boîtier en porte plusieurs graphies que "
+        "seule la casse distingue, le détail est dans le journal.",
+        "2 groupes du fichier n'ont été touchés pour aucun compte : le boîtier en porte "
+        "plusieurs graphies que seule la casse distingue, le détail est dans le journal.",
+    ]
+
+
+def test_le_rapport_final_sans_ambiguite_n_en_parle_pas() -> None:
+    assert lignes_du_rapport(Rapport()) == ["Terminé : 0 compte créé, 0 groupe créé, 0 échec."]
+
+
+def test_un_arret_demande_dit_aussi_ce_qui_n_a_rien_recu() -> None:
+    """L'arrêt demandé a son propre bilan : les ambiguïtés ne doivent pas s'y perdre."""
+    rapport = Rapport(
+        interrompu=True,
+        motif_arret=MotifArret.OPERATEUR,
+        comptes_prevus=3,
+        plan_construit=True,
+        nombre_comptes_ambigus=1,
+    )
+    assert any("n'a rien reçu" in ligne for ligne in lignes_du_rapport(rapport))
 
 
 def test_un_lot_interrompu_le_dit_dans_son_rapport() -> None:

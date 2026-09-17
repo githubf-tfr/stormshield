@@ -215,6 +215,26 @@ def test_un_compte_ambigu_ne_recoit_rien_et_le_lot_continue() -> None:
     assert sorted(boitier.utilisateurs) == ["JEAN.DUPONT", "Jean.Dupont", "legrand"]
 
 
+def test_le_rapport_porte_le_nombre_de_comptes_et_de_groupes_ambigus() -> None:
+    """Les ambiguïtés n'atteignaient jamais le rapport : le bilan final disait « 0 échec »
+    pendant qu'un compte du fichier n'avait rien reçu. Elles sont figées sur le plan
+    construit, comme les comptes prévus : c'est l'état lu au moment où l'opérateur a
+    décidé."""
+    boitier = BoitierMemoire(
+        utilisateurs=["Jean.Dupont", "JEAN.DUPONT"], groupes=["Rh", "RH"]
+    )
+    rapport, _ = _lancer(
+        boitier,
+        [_utilisateur("jean.dupont", "rh"), _utilisateur("legrand", "rh", ligne=3)],
+    )
+    assert (rapport.nombre_comptes_ambigus, rapport.nombre_groupes_ambigus) == (1, 1)
+
+
+def test_un_lot_sans_ambiguite_n_en_compte_aucune() -> None:
+    rapport, _ = _lancer(BoitierMemoire(), [_utilisateur("dupont", "compta")])
+    assert (rapport.nombre_comptes_ambigus, rapport.nombre_groupes_ambigus) == (0, 0)
+
+
 def test_aucun_mot_de_passe_genere_quand_la_creation_echoue() -> None:
     """USER CREATE refusé : le secret n'est jamais tiré."""
     boitier = BoitierMemoire()

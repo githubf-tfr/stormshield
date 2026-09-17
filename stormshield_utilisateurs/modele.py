@@ -199,6 +199,13 @@ class Rapport:
     # se juge à ce qu'il laisse derrière lui : sans ce total, le bilan pourrait dire
     # combien de comptes sont nés, jamais combien n'ont pas été touchés.
     comptes_prevus: int = 0
+    # Comptes et groupes du fichier que deux graphies vivantes du boîtier revendiquent,
+    # figés à la construction du plan comme `comptes_prevus`. Des nombres, jamais des
+    # noms : le journal les nomme un par un, le bilan dit seulement combien de comptes
+    # n'ont rien reçu du tout — sans quoi ils ne seraient comptés nulle part, ni aux
+    # échecs, ni ailleurs.
+    nombre_comptes_ambigus: int = 0
+    nombre_groupes_ambigus: int = 0
     # Faux tant que la phase de lecture n'a pas abouti à un plan. `comptes_prevus` vaut
     # alors zéro faute d'avoir été compté, et non parce que rien n'était à créer : sans
     # cette distinction, un arrêt tombé pendant la lecture se raconterait comme un lot
