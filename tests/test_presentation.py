@@ -1135,9 +1135,35 @@ def test_le_rapport_final_sans_ambiguite_n_en_parle_pas() -> None:
     assert lignes_du_rapport(Rapport()) == ["Terminé : 0 compte créé, 0 groupe créé, 0 échec."]
 
 
-def test_un_arret_demande_dit_aussi_ce_qui_n_a_rien_recu() -> None:
-    """L'arrêt demandé a son propre bilan : les ambiguïtés ne doivent pas s'y perdre."""
+def test_une_simulation_ne_singularise_pas_le_compte_ambigu_qui_n_a_rien_recu() -> None:
+    """Une simulation n'écrit rien, par construction : `comptes_crees`, `groupes_crees`
+    et `echecs` restent tous les trois vides. Dire alors « 1 compte du fichier n'a rien
+    reçu » est littéralement vrai, mais singularise ce compte-là alors qu'aucun compte,
+    ambigu ou non, n'a rien reçu de personne — la phrase n'a de sens que par contraste
+    avec des comptes qui, eux, ont reçu quelque chose."""
+    rapport = Rapport(nombre_comptes_ambigus=1)
+    assert not any("n'a rien reçu" in ligne for ligne in lignes_du_rapport(rapport))
+
+
+def test_un_arret_demande_avant_toute_ecriture_ne_singularise_pas_l_ambigu() -> None:
+    """Même défaut sur l'arrêt demandé : tombé avant la première écriture, il laisse
+    lui aussi `comptes_crees`, `groupes_crees` et `echecs` vides — rien ne distingue
+    encore le compte ambigu des autres."""
     rapport = Rapport(
+        interrompu=True,
+        motif_arret=MotifArret.OPERATEUR,
+        comptes_prevus=3,
+        plan_construit=True,
+        nombre_comptes_ambigus=1,
+    )
+    assert not any("n'a rien reçu" in ligne for ligne in lignes_du_rapport(rapport))
+
+
+def test_un_arret_demande_apres_une_ecriture_dit_aussi_ce_qui_n_a_rien_recu() -> None:
+    """L'arrêt demandé a son propre bilan : dès qu'un compte a reçu quelque chose, les
+    ambiguïtés ne doivent pas s'y perdre — le contraste redevient vrai."""
+    rapport = Rapport(
+        comptes_crees=[CompteCree("dupont", "s3cr3t")],
         interrompu=True,
         motif_arret=MotifArret.OPERATEUR,
         comptes_prevus=3,

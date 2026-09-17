@@ -883,12 +883,19 @@ def lignes_du_rapport(rapport: Rapport) -> list[str]:
     # Avant le détail des échecs, et dans les trois fins possibles : un compte ambigu
     # n'a rien reçu du tout — ni création, ni adhésion, ni mot de passe — et n'est
     # compté comme échec nulle part. Le bilan est ce sur quoi l'opérateur rend compte.
-    lignes.extend(
-        f"{phrase} : {_MOTIF_DE_L_AMBIGUITE}, le détail est dans le journal."
-        for phrase in _phrases_des_ambiguites(
-            rapport.nombre_comptes_ambigus, rapport.nombre_groupes_ambigus, revolu=True
+    #
+    # « N'a rien reçu » ne vaut que par contraste avec des comptes qui, eux, ont reçu
+    # quelque chose : en simulation, ou sur un arrêt demandé tombé avant la première
+    # écriture, ces trois listes sont toutes vides et la phrase serait littéralement
+    # vraie mais singulariserait le compte ambigu au milieu de comptes tout aussi
+    # vierges, qu'elle ne compte pourtant pas.
+    if rapport.comptes_crees or rapport.groupes_crees or rapport.echecs:
+        lignes.extend(
+            f"{phrase} : {_MOTIF_DE_L_AMBIGUITE}, le détail est dans le journal."
+            for phrase in _phrases_des_ambiguites(
+                rapport.nombre_comptes_ambigus, rapport.nombre_groupes_ambigus, revolu=True
+            )
         )
-    )
     lignes.extend(f"{echec.identifiant} — {echec.operation} : {echec.motif}"
                   for echec in rapport.echecs)
     sans_secret = rapport.sans_mot_de_passe
