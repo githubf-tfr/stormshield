@@ -50,10 +50,15 @@ class Ambigu:
     """Deux graphies vivantes que la clé confond, et aucune égale à celle du fichier.
 
     L'outil ne sait pas laquelle viser. Il le signale et poursuit : le doublon ne se
-    lève qu'à la main, sur le boîtier.
+    lève qu'à la main, sur le boîtier. Les graphies sont triées à la construction :
+    rien ne garantit l'ordre dans lequel le boîtier les rend, et ni l'égalité ni
+    l'affichage ne doivent en dépendre.
     """
 
     graphies: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "graphies", tuple(sorted(self.graphies)))
 
 
 Resolution = Reconnu | Absent | Ambigu

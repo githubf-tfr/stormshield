@@ -38,6 +38,23 @@ def test_une_chaine_vide_ne_rend_rien() -> None:
     assert uid_du_dn("") is None
 
 
+def test_un_dn_malforme_ne_leve_pas_et_ne_rend_rien() -> None:
+    """N'importe quel texte sans forme reconnue : compté, jamais une erreur."""
+    assert uid_du_dn("ceci n'est pas un dn du tout") is None
+
+
+def test_un_dn_reduit_a_l_uid_sans_virgule_est_lu_quand_meme() -> None:
+    assert uid_du_dn("uid=jean.dupont") == "jean.dupont"
+
+
+def test_une_valeur_d_uid_contenant_un_signe_egal_est_conservee_en_entier() -> None:
+    assert uid_du_dn("uid=jean=dupont,ou=users,dc=interne,dc=local") == "jean=dupont"
+
+
+def test_les_espaces_autour_de_la_valeur_sont_elagues() -> None:
+    assert uid_du_dn("uid= jean.dupont ,ou=users,dc=interne,dc=local") == "jean.dupont"
+
+
 def test_un_nom_absent_de_l_index_est_a_creer() -> None:
     assert IndexBoitier.depuis(("compta",)).resoudre("rh") == Absent()
 
@@ -71,3 +88,24 @@ def test_l_index_conserve_toutes_les_graphies_rendues() -> None:
 
 def test_un_index_vide_ne_reconnait_rien() -> None:
     assert IndexBoitier.depuis(()).resoudre("compta") == Absent()
+
+
+def test_la_resolution_ne_depend_pas_de_l_ordre_de_rendu_du_boitier() -> None:
+    """Rien ne garantit l'ordre dans lequel le boîtier rend sa liste (spec) : ni la
+    catégorie de décision, ni son contenu, ne doivent en dépendre."""
+    dans_un_ordre = IndexBoitier.depuis(("Compta", "COMPTA")).resoudre("compta")
+    dans_l_autre_ordre = IndexBoitier.depuis(("COMPTA", "Compta")).resoudre("compta")
+    assert dans_un_ordre == dans_l_autre_ordre == Ambigu(("COMPTA", "Compta"))
+
+    exact_dans_un_ordre = IndexBoitier.depuis(("Compta", "compta")).resoudre("compta")
+    exact_dans_l_autre_ordre = IndexBoitier.depuis(("compta", "Compta")).resoudre("compta")
+    assert exact_dans_un_ordre == exact_dans_l_autre_ordre == Reconnu("compta")
+
+
+def test_ambigu_trie_ses_graphies_quel_que_soit_l_ordre_d_arrivee() -> None:
+    """Une tâche ultérieure affichera peut-être ces graphies à l'opérateur : le
+    message ne doit pas changer d'une exécution à l'autre selon l'ordre du boîtier."""
+    ambigu = IndexBoitier.depuis(("COMPTA", "Compta")).resoudre("compta")
+    assert ambigu == Ambigu(("COMPTA", "Compta"))
+    assert isinstance(ambigu, Ambigu)
+    assert ambigu.graphies == tuple(sorted(ambigu.graphies))
