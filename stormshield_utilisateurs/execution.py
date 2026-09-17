@@ -208,6 +208,29 @@ Emetteur = Callable[[Evenement], None]
 # d'écriture. Rend faux quand l'opérateur renonce : rien n'est alors envoyé au boîtier.
 Confirmation = Callable[[Plan], bool]
 
+# Vrai quand l'opérateur a demandé l'arrêt du lot. Consulté entre deux comptes et entre
+# deux groupes ; le métier ne sait pas d'où vient la réponse, ce qui le rend éprouvable
+# hors de toute fenêtre.
+ArretDemande = Callable[[], bool]
+
+
+def jamais_arrete() -> bool:
+    """Valeur par défaut : le sens sûr est de ne rien arrêter. L'inverse de la
+    confirmation, dont un défaut voulant dire « oui » serait une trappe."""
+    return False
+
+
+class _ArretParLOperateur(Exception):
+    """Interne : l'opérateur a cliqué sur *Arrêter*, l'unité de travail suivante n'est
+    pas entamée.
+
+    Une exception plutôt qu'un booléen rendu de proche en proche : la vérification a lieu
+    au sommet de deux boucles portées par deux fonctions distinctes, et un drapeau qu'il
+    faut penser à remonter à chaque niveau finit par s'oublier. Elle ne croise jamais le
+    traitement des pannes, qui n'intercepte que les erreurs du boîtier.
+    """
+
+
 ABANDON_A_LA_CONFIRMATION = (
     "lot abandonné à la confirmation : aucune écriture n'a été tentée, "
     "rien n'a été envoyé au boîtier."
@@ -257,6 +280,7 @@ def executer(
     rejets: Sequence[Rejet] = (),
     patience: Patience = PATIENCE_PAR_DEFAUT,
     generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str] = motdepasse.generer,
+    arret_demande: ArretDemande = jamais_arrete,
 ) -> Rapport:
     """Connexion, lecture, plan, puis écritures si Simulation est décochée.
 
@@ -267,6 +291,9 @@ def executer(
     accord explicite, donné sur le plan qui vient d'être lu. Une valeur par défaut qui
     voudrait dire « oui » serait une trappe — l'appelant qui l'oublierait écrirait sur
     le firewall sans que personne n'ait rien vu.
+
+    `arret_demande` a la valeur par défaut inverse, pour la même raison : ne rien
+    arrêter est ici le sens sûr.
     """
     rapport = Rapport()
     compteur = _Compteur(emettre)
@@ -290,12 +317,18 @@ def executer(
             _arreter_politique(rapport, emettre, manquements, etat.plancher)
         else:
             plan_courant = construction_plan.construire(utilisateurs, etat, rejets)
+            # Figé ici : un plan reconstruit après reconnexion ne compte plus que le
+            # reste, et le bilan d'un arrêt doit se dire contre ce qui était prévu.
+            rapport.comptes_prevus = len(plan_courant.comptes_a_creer)
             compteur.fixer_total(
                 NOMBRE_LECTURES + (0 if simulation else plan_courant.nombre_operations())
             )
             for _ in range(NOMBRE_LECTURES):
                 compteur.avancer()
             emettre(PlanPret(plan_courant))
+            # Seul point d'arrêt d'une simulation, qui n'a rien à écrire ensuite ; en
+            # lot réel il évite de poser une question sur un lot déjà arrêté.
+            _verifier_arret(arret_demande)
             # Le plan est émis avant la demande : l'opérateur décide en le voyant à
             # l'écran, et non pendant que les comptes partent.
             if not simulation and not confirmer(plan_courant):
@@ -313,7 +346,10 @@ def executer(
                     emettre,
                     patience,
                     generer_mot_de_passe,
+                    arret_demande,
                 )
+    except _ArretParLOperateur:
+        _arreter_par_l_operateur(rapport, emettre)
     except ErreurFatale as erreur:
         # D'où qu'elle vienne — connexion initiale, lecture d'état, écriture en
         # cours de lot, tentative de reconnexion — une reconnexion ne la résoudra
@@ -339,6 +375,7 @@ def _appliquer(
     emettre: Emetteur,
     patience: Patience,
     generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str],
+    arret_demande: ArretDemande,
 ) -> None:
     """Boucle d'écriture. Sur perte de liaison : reconnecte, reconstruit, reprend."""
     reste = plan_courant
@@ -348,10 +385,10 @@ def _appliquer(
     while True:
         accomplies_avant = compteur.accomplies
         try:
-            _creer_groupes(boitier, reste, rapport, compteur, emettre, refuses)
+            _creer_groupes(boitier, reste, rapport, compteur, emettre, refuses, arret_demande)
             _creer_comptes(
                 boitier, reste, politique, rapport, compteur, emettre,
-                patience, generer_mot_de_passe, refuses,
+                patience, generer_mot_de_passe, refuses, arret_demande,
             )
             return
         except ErreurReseau:
@@ -424,6 +461,30 @@ def _arreter_fatal(rapport: Rapport, emettre: Emetteur, erreur: ErreurFatale) ->
             "corrigez les identifiants ou la configuration avant de relancer le lot. "
             "Ce qui est créé reste créé, le CSV des mots de passe couvre les comptes "
             "réellement créés."
+        )
+    )
+
+
+def _verifier_arret(arret_demande: ArretDemande) -> None:
+    """À appeler entre deux unités de travail, jamais au milieu de l'une d'elles.
+
+    Un compte entamé va jusqu'au bout — `USER CREATE`, `USER PASSWORD`, puis les
+    rattachements : c'est tout l'intérêt de cet arrêt sur la fermeture brutale de la
+    fenêtre qu'il remplace, laquelle coupe le fil n'importe où et peut laisser un compte
+    sans mot de passe utilisable qu'aucun relancement ne réparera.
+    """
+    if arret_demande():
+        raise _ArretParLOperateur
+
+
+def _arreter_par_l_operateur(rapport: Rapport, emettre: Emetteur) -> None:
+    """Arrêt sur ordre : ni panne à attendre, ni erreur à corriger avant de relancer."""
+    _marquer_arret(rapport, MotifArret.OPERATEUR)
+    emettre(
+        Journal(
+            "arrêt demandé : le compte en cours est allé à son terme, les suivants n'ont "
+            "pas été entamés. Relancer est sans danger : les comptes créés seront vus "
+            "comme déjà présents."
         )
     )
 
@@ -505,8 +566,10 @@ def _reconnecter(boitier: Boitier, patience: Patience, emettre: Emetteur) -> boo
 def _creer_groupes(
     boitier: Boitier, plan_courant: Plan, rapport: Rapport,
     compteur: _Compteur, emettre: Emetteur, refuses: _Refuses,
+    arret_demande: ArretDemande,
 ) -> None:
     for groupe in plan_courant.groupes_a_creer:
+        _verifier_arret(arret_demande)
         try:
             boitier.creer_groupe(groupe.nom)
         except ErreurCommande as erreur:
@@ -523,9 +586,10 @@ def _creer_comptes(
     boitier: Boitier, plan_courant: Plan, politique: PolitiqueMotDePasse,
     rapport: Rapport, compteur: _Compteur, emettre: Emetteur,
     patience: Patience, generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str],
-    refuses: _Refuses,
+    refuses: _Refuses, arret_demande: ArretDemande,
 ) -> None:
     for utilisateur in plan_courant.comptes_a_creer:
+        _verifier_arret(arret_demande)
         try:
             boitier.creer_utilisateur(
                 utilisateur.identifiant, utilisateur.nom, utilisateur.prenom,

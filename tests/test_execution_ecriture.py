@@ -47,6 +47,23 @@ def _utilisateur(identifiant: str, *groupes: str, ligne: int = 2) -> Utilisateur
     )
 
 
+class _Interrupteur:
+    """Le bouton *Arrêter* de la fenêtre, réduit à ce que le métier en voit.
+
+    En production c'est un `threading.Event` posé depuis le fil de l'interface ; ici le
+    test le bascule lui-même, au moment exact qu'il veut éprouver.
+    """
+
+    def __init__(self, *, demande: bool = False) -> None:
+        self.demande = demande
+
+    def demander(self) -> None:
+        self.demande = True
+
+    def __call__(self) -> bool:
+        return self.demande
+
+
 def _lancer(
     boitier: BoitierMemoire,
     utilisateurs: list[Utilisateur],
@@ -55,6 +72,7 @@ def _lancer(
     rejets: Sequence[Rejet] = (),
     generer: Callable[[PolitiqueMotDePasse], str] = lambda _politique: "MotDePasse1!",
     confirmer: Callable[[Plan], bool] = lambda _plan: True,
+    arret: Callable[[], bool] = lambda: False,
 ) -> tuple[Rapport, list[Evenement]]:
     evenements: list[Evenement] = []
     rapport = executer(
@@ -67,6 +85,7 @@ def _lancer(
         rejets=rejets,
         patience=PATIENCE,
         generer_mot_de_passe=generer,
+        arret_demande=arret,
     )
     return rapport, evenements
 
@@ -752,6 +771,158 @@ def test_interrompu_et_motif_d_arret_restent_coherents() -> None:
     complet, _ = _lancer(BoitierMemoire(), [_utilisateur("dupont")])
     for rapport in (interrompu, complet):
         assert rapport.interrompu is (rapport.motif_arret is not None)
+
+
+# --- arrêt demandé par l'opérateur ----------------------------------------
+
+
+def test_le_compte_en_cours_va_jusqu_au_bout_et_le_suivant_n_est_pas_entame() -> None:
+    """Tout l'intérêt de l'arrêt : il remplace la fermeture brutale de la fenêtre, qui
+    coupait le fil n'importe où — y compris entre USER CREATE et USER PASSWORD, laissant
+    un compte sans mot de passe utilisable qu'aucun relancement ne répare."""
+    boitier = BoitierMemoire()
+    interrupteur = _Interrupteur()
+
+    def cliquer_pendant_la_creation(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "dupont":
+            interrupteur.demander()
+
+    boitier.declencheur = cliquer_pendant_la_creation
+    rapport, _ = _lancer(
+        boitier,
+        [_utilisateur("dupont", "compta"), _utilisateur("martin")],
+        arret=interrupteur,
+    )
+    assert boitier.utilisateurs == ["dupont"]
+    assert boitier.mots_de_passe == {"dupont": "MotDePasse1!"}
+    assert boitier.membres == {"compta": ["dupont"]}
+    assert rapport.interrompu is True
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+
+
+def test_le_rapport_d_un_arret_demande_dit_ce_que_le_plan_prevoyait() -> None:
+    """Le bilan doit pouvoir dire combien de comptes n'ont pas été touchés, et non
+    seulement combien sont nés."""
+    boitier = BoitierMemoire()
+    interrupteur = _Interrupteur()
+
+    def cliquer_au_premier_compte(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "dupont":
+            interrupteur.demander()
+
+    boitier.declencheur = cliquer_au_premier_compte
+    rapport, _ = _lancer(
+        boitier,
+        [_utilisateur("dupont"), _utilisateur("martin"), _utilisateur("legrand")],
+        arret=interrupteur,
+    )
+    assert rapport.comptes_prevus == 3
+    assert [compte.identifiant for compte in rapport.comptes_crees] == ["dupont"]
+
+
+def test_un_arret_demande_n_entame_pas_le_groupe_suivant() -> None:
+    boitier = BoitierMemoire()
+    interrupteur = _Interrupteur()
+
+    def cliquer_pendant_le_premier_groupe(operation: str, cible: str) -> None:
+        if operation == "creer_groupe" and cible == "compta":
+            interrupteur.demander()
+
+    boitier.declencheur = cliquer_pendant_le_premier_groupe
+    rapport, _ = _lancer(
+        boitier,
+        [_utilisateur("dupont", "compta"), _utilisateur("martin", "rh")],
+        arret=interrupteur,
+    )
+    assert boitier.groupes == ["compta"]
+    assert boitier.utilisateurs == []
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+
+
+def test_l_arret_demande_pendant_une_simulation_est_pris_en_compte() -> None:
+    """La simulation ne fait que lire, mais lire prend aussi du temps : un bouton qui ne
+    réagirait pas dans un cas sur deux serait déroutant."""
+    boitier = BoitierMemoire()
+    rapport, _ = _lancer(
+        boitier,
+        [_utilisateur("dupont")],
+        simulation=True,
+        arret=_Interrupteur(demande=True),
+    )
+    assert rapport.interrompu is True
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+    assert _ecritures(boitier) == []
+
+
+def test_un_arret_demande_avant_la_premiere_ecriture_ne_pose_pas_la_confirmation() -> None:
+    """Demander l'autorisation d'écrire un lot que l'opérateur vient d'arrêter n'aurait
+    aucun sens, et rien ne doit partir."""
+    boitier = BoitierMemoire()
+    questions: list[Plan] = []
+
+    def noter(plan: Plan) -> bool:
+        questions.append(plan)
+        return True
+
+    rapport, _ = _lancer(
+        boitier,
+        [_utilisateur("dupont", "compta")],
+        confirmer=noter,
+        arret=_Interrupteur(demande=True),
+    )
+    assert questions == []
+    assert _ecritures(boitier) == []
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+
+
+def test_la_barre_gele_sous_son_total_sur_un_arret_demande() -> None:
+    """Contrat de progression : la barre ne ment pas en s'achevant, et son total ne
+    croît jamais. C'est `rapport.interrompu` qui dit si le lot est allé au bout."""
+    boitier = BoitierMemoire()
+    interrupteur = _Interrupteur()
+
+    def cliquer_au_premier_compte(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "dupont":
+            interrupteur.demander()
+
+    boitier.declencheur = cliquer_au_premier_compte
+    _, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont"), _utilisateur("martin")],
+        arret=interrupteur,
+    )
+    progressions = _progressions(evenements)
+    assert progressions[-1].accomplies < progressions[-1].total
+    totaux = [progression.total for progression in progressions]
+    assert max(totaux) == totaux[-1]
+
+
+def test_l_arret_demande_laisse_une_ligne_de_journal() -> None:
+    """Le journal est la seule trace : il doit dire que le lot s'est arrêté sur ordre,
+    et non sur une panne."""
+    boitier = BoitierMemoire()
+    _, evenements = _lancer(
+        boitier, [_utilisateur("dupont")], arret=_Interrupteur(demande=True)
+    )
+    assert any("arrêt demandé" in texte for texte in _textes(evenements))
+
+
+def test_sans_demande_d_arret_le_lot_va_jusqu_au_bout() -> None:
+    """La valeur par défaut ne doit jamais arrêter quoi que ce soit : c'est le sens sûr,
+    l'inverse d'une confirmation par défaut."""
+    boitier = BoitierMemoire()
+    rapport = executer(
+        boitier,
+        [_utilisateur("dupont"), _utilisateur("martin")],
+        POLITIQUE,
+        simulation=False,
+        emettre=lambda _evenement: None,
+        confirmer=lambda _plan: True,
+        patience=PATIENCE,
+        generer_mot_de_passe=lambda _politique: "MotDePasse1!",
+    )
+    assert boitier.utilisateurs == ["dupont", "martin"]
+    assert rapport.interrompu is False
 
 
 def test_bascule_en_minuscules_signalee_au_journal() -> None:
