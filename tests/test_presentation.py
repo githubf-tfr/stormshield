@@ -39,6 +39,7 @@ from stormshield_utilisateurs.modele import (
     PolitiqueMotDePasse,
     Rapport,
     Rejet,
+    TravailCompte,
 )
 from stormshield_utilisateurs.presentation import (
     ARRET_DEMANDE_AU_CLIC,
@@ -646,41 +647,53 @@ def test_le_pluriel_des_rejets_suit_leur_nombre() -> None:
     ] == "1 ligne lue, 2 rejets"
 
 
-def test_le_plan_annonce_groupes_comptes_ignores_et_orphelins() -> None:
-    plan = Plan(
-        comptes_a_creer=(utilisateur("dupont", "compta_bis"),),
-        comptes_ignores=(utilisateur("legrand"),),
-        groupes_a_creer=(GroupeACreer("compta_bis", 1),),
-        orphelins=("martin",),
+def _travail(identifiant: str, *adhesions: str, a_creer: bool = True) -> TravailCompte:
+    return TravailCompte(
+        utilisateur=utilisateur(identifiant),
+        identifiant_cible=identifiant,
+        a_creer=a_creer,
+        adhesions=adhesions,
+    )
+
+
+def _plan(
+    *travaux: TravailCompte,
+    groupes: tuple[GroupeACreer, ...] = (),
+    nombre_orphelins: int = 0,
+) -> Plan:
+    return Plan(
+        travaux=travaux,
+        groupes_a_creer=groupes,
+        nombre_orphelins=nombre_orphelins,
+        nombre_membres_non_rattaches=0,
+        groupes_ambigus=(),
+        comptes_ambigus=(),
         domaine="interne.local",
+    )
+
+
+def test_le_plan_annonce_groupes_comptes_presents_et_orphelins() -> None:
+    plan = _plan(
+        _travail("dupont", "compta_bis"),
+        _travail("legrand", a_creer=False),
+        groupes=(GroupeACreer("compta_bis", 1),),
+        nombre_orphelins=1,
     )
     assert lignes_du_plan(plan) == [
         "Groupes à créer : compta_bis (1 membre)",
         "dupont : à créer, rattaché à compta_bis",
-        "legrand : déjà présent, ignoré",
-        "Orphelins sur le boîtier : martin",
+        "legrand : présent",
+        "Orphelins sur le boîtier : 1",
     ]
 
 
 def test_l_accord_de_membre_suit_le_nombre_de_membres() -> None:
-    plan = Plan(
-        comptes_a_creer=(),
-        comptes_ignores=(),
-        groupes_a_creer=(GroupeACreer("rh", 3), GroupeACreer("compta", 1)),
-        orphelins=(),
-        domaine="interne.local",
-    )
+    plan = _plan(groupes=(GroupeACreer("rh", 3), GroupeACreer("compta", 1)))
     assert lignes_du_plan(plan) == ["Groupes à créer : rh (3 membres), compta (1 membre)"]
 
 
 def test_un_plan_sans_groupe_ni_orphelin_n_annonce_ni_l_un_ni_l_autre() -> None:
-    plan = Plan(
-        comptes_a_creer=(utilisateur("dupont"),),
-        comptes_ignores=(),
-        groupes_a_creer=(),
-        orphelins=(),
-        domaine="interne.local",
-    )
+    plan = _plan(_travail("dupont"))
     assert lignes_du_plan(plan) == ["dupont : à créer"]
 
 
@@ -749,24 +762,12 @@ def test_le_secret_de_l_annuaire_ne_figure_pas_dans_le_repr() -> None:
 # --- confirmation avant écriture ------------------------------------------
 
 
-def _plan(
-    comptes: tuple[str, ...] = ("dupont",),
-    groupes: tuple[GroupeACreer, ...] = (),
-) -> Plan:
-    return Plan(
-        comptes_a_creer=tuple(utilisateur(identifiant) for identifiant in comptes),
-        comptes_ignores=(),
-        groupes_a_creer=groupes,
-        orphelins=(),
-        domaine="interne.local",
-    )
-
-
 def test_la_confirmation_nomme_l_hote_les_comptes_et_les_groupes_neufs() -> None:
     """Le produit demandait confirmation pour perdre des mots de passe et pas pour écrire
     sur un firewall : c'est cette asymétrie que ce texte corrige."""
     texte = texte_de_confirmation_du_lot(
-        "firewall.local", _plan(("dupont", "martin"), (GroupeACreer("rh", 2),))
+        "firewall.local",
+        _plan(_travail("dupont"), _travail("martin"), groupes=(GroupeACreer("rh", 2),)),
     )
     assert "firewall.local" in texte
     assert "2 comptes à créer" in texte
@@ -779,7 +780,7 @@ def test_la_confirmation_signale_un_groupe_neuf_a_un_seul_membre() -> None:
     """Un groupe neuf à un membre est la signature d'une coquille de saisie, et un groupe
     fantôme créé sur le boîtier ne s'annule pas depuis cet outil."""
     texte = texte_de_confirmation_du_lot(
-        "firewall.local", _plan(("dupont",), (GroupeACreer("compta_bis", 1),))
+        "firewall.local", _plan(_travail("dupont"), groupes=(GroupeACreer("compta_bis", 1),))
     )
     assert "Un groupe neuf n'aurait qu'un seul membre (compta_bis)" in texte
     assert "coquille de saisie" in texte
@@ -788,13 +789,17 @@ def test_la_confirmation_signale_un_groupe_neuf_a_un_seul_membre() -> None:
 def test_la_confirmation_accorde_le_signalement_a_plusieurs_groupes_solitaires() -> None:
     texte = texte_de_confirmation_du_lot(
         "firewall.local",
-        _plan(("dupont", "martin"), (GroupeACreer("compta_bis", 1), GroupeACreer("rh", 1))),
+        _plan(
+            _travail("dupont"),
+            _travail("martin"),
+            groupes=(GroupeACreer("compta_bis", 1), GroupeACreer("rh", 1)),
+        ),
     )
     assert "2 groupes neufs n'auraient qu'un seul membre (compta_bis, rh)" in texte
 
 
 def test_la_confirmation_sans_groupe_neuf_ne_parle_pas_de_groupes() -> None:
-    texte = texte_de_confirmation_du_lot("firewall.local", _plan(("dupont",)))
+    texte = texte_de_confirmation_du_lot("firewall.local", _plan(_travail("dupont")))
     assert "1 compte à créer, 0 groupe neuf." in texte
     assert "Groupes à créer" not in texte
     assert "seul membre" not in texte
@@ -803,11 +808,11 @@ def test_la_confirmation_sans_groupe_neuf_ne_parle_pas_de_groupes() -> None:
 def test_la_demande_porte_son_texte_et_debloque_le_fil_sur_la_reponse() -> None:
     """Seul message à circuler dans les deux sens : le fil ne peut pas ouvrir de boîte de
     dialogue, la fenêtre ne peut pas décider à la place de l'opérateur."""
-    demande = DemandeConfirmation(_plan(("dupont",)), "firewall.local")
+    demande = DemandeConfirmation(_plan(_travail("dupont")), "firewall.local")
     assert demande.texte == texte_de_confirmation_du_lot("firewall.local", demande.plan)
     demande.repondre(True)
     assert demande.attendre() is True
-    refus = DemandeConfirmation(_plan(("dupont",)), "firewall.local")
+    refus = DemandeConfirmation(_plan(_travail("dupont")), "firewall.local")
     refus.repondre(False)
     assert refus.attendre() is False
 
@@ -863,7 +868,7 @@ def test_travailler_transmet_les_rejets_a_executer() -> None:
         fabriquer_boitier=lambda _: boitier,
     )
     plans = [message for message in messages if isinstance(message, PlanPret)]
-    assert plans[0].plan.orphelins == ()
+    assert plans[0].plan.nombre_orphelins == 0
 
 
 def test_le_rapport_resume_puis_detaille_les_echecs() -> None:

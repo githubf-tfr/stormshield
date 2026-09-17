@@ -18,8 +18,10 @@ def test_un_annuaire_est_le_cas_nominal() -> None:
     boitier = BoitierMemoire(utilisateurs=["martin"], groupes=["rh"])
     etat = lire_etat(boitier)
     assert etat.domaine == "interne.local"
-    assert etat.utilisateurs == frozenset({"martin"})
-    assert etat.groupes == frozenset({"rh"})
+    # Les graphies rendues par le boîtier, pas des clés : c'est sous elles que l'outil
+    # s'adressera à lui.
+    assert etat.comptes.graphies == ("martin",)
+    assert etat.groupes.graphies == ("rh",)
     assert etat.plancher.longueur_min == 12
 
 

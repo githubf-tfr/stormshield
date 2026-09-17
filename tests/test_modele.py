@@ -10,7 +10,20 @@ from stormshield_utilisateurs.modele import (
     Plan,
     PolitiqueMotDePasse,
     Rapport,
+    TravailCompte,
 )
+
+
+def _plan(*travaux: TravailCompte, groupes: tuple[GroupeACreer, ...] = ()) -> Plan:
+    return Plan(
+        travaux=travaux,
+        groupes_a_creer=groupes,
+        nombre_orphelins=0,
+        nombre_membres_non_rattaches=0,
+        groupes_ambigus=(),
+        comptes_ambigus=(),
+        domaine="interne.local",
+    )
 
 
 def test_bascule_minuscules_signalee_quand_le_fichier_differe() -> None:
@@ -27,14 +40,41 @@ def test_nombre_de_classes_de_la_politique() -> None:
 
 def test_nombre_d_operations_du_plan() -> None:
     """1 groupe + (USER CREATE + USER PASSWORD + 2 ADDUSER) + (USER CREATE + USER PASSWORD)."""
-    plan = Plan(
-        comptes_a_creer=(utilisateur("dupont", "compta", "rh"), utilisateur("legrand")),
-        comptes_ignores=(),
-        groupes_a_creer=(GroupeACreer(nom="compta", nombre_membres=1),),
-        orphelins=(),
-        domaine="interne.local",
+    plan = _plan(
+        TravailCompte(
+            utilisateur=utilisateur("dupont", "compta", "rh"),
+            identifiant_cible="dupont",
+            a_creer=True,
+            adhesions=("compta", "rh"),
+        ),
+        TravailCompte(
+            utilisateur=utilisateur("legrand"),
+            identifiant_cible="legrand",
+            a_creer=True,
+            adhesions=(),
+        ),
+        groupes=(GroupeACreer(nom="compta", nombre_membres=1),),
     )
     assert plan.nombre_operations() == 1 + 4 + 2
+
+
+def test_un_compte_deja_present_ne_coute_que_ses_adhesions() -> None:
+    """Deux opérations et non quatre : ni USER CREATE ni USER PASSWORD ne le visent.
+
+    C'est la garantie que le nouveau périmètre met le plus à l'épreuve — l'outil écrit
+    désormais sur des comptes existants — et la barre de progression viserait un total
+    que rien ne peut plus atteindre si elle les comptait.
+    """
+    plan = _plan(
+        TravailCompte(
+            utilisateur=utilisateur("legrand", "compta", "rh"),
+            identifiant_cible="legrand",
+            a_creer=False,
+            adhesions=("compta", "rh"),
+        )
+    )
+    assert plan.creations == ()
+    assert plan.nombre_operations() == 2
 
 
 def test_comptes_sans_mot_de_passe_isoles_dans_le_rapport() -> None:

@@ -1,7 +1,10 @@
 """Structures de données partagées. Aucune logique de décision, aucun accès réseau."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, auto
+
+from stormshield_utilisateurs.rapprochement import IndexBoitier
 
 
 @dataclass(frozen=True)
@@ -53,12 +56,21 @@ class PolitiqueMotDePasse:
 
 @dataclass(frozen=True)
 class EtatBoitier:
-    """Ce que la phase de lecture rapporte du boîtier. Lecture seule."""
+    """Ce que la phase de lecture rapporte du boîtier. Lecture seule.
+
+    `comptes` et `groupes` portent les graphies rendues par le boîtier, rangées sous la
+    clé de rapprochement : c'est sous ces graphies-là que l'outil s'adressera à lui.
+
+    `membres_par_groupe` ne couvre que les groupes **cités par le fichier et reconnus**
+    sur le boîtier, rangés sous leur clé. Un groupe absent de cette table n'a pas été
+    lu : aucune adhésion n'y est réputée exister.
+    """
 
     domaine: str
     plancher: PlancherPolitique
-    utilisateurs: frozenset[str]
-    groupes: frozenset[str]
+    comptes: IndexBoitier
+    groupes: IndexBoitier
+    membres_par_groupe: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -68,19 +80,76 @@ class GroupeACreer:
 
 
 @dataclass(frozen=True)
+class GroupeAmbigu:
+    """Un groupe du fichier que deux graphies vivantes du boîtier revendiquent.
+
+    Signalé, jamais tranché : l'outil ne sait pas auquel des deux ajouter, il n'en crée
+    aucun — ils existent — et ne touche ce groupe pour aucun compte. Le lot continue.
+    """
+
+    nom_fichier: str
+    graphies: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CompteAmbigu:
+    """Un compte du fichier que deux graphies vivantes du boîtier revendiquent.
+
+    Même règle que pour un groupe, et pour la même raison : l'ordre dans lequel le
+    boîtier rend sa liste n'est garanti par rien, et trancher sur la première graphie
+    ferait écrire sur un compte différent d'une exécution à l'autre. Signalé, jamais
+    tranché : aucun travail n'est produit pour lui — ni création, ni adhésion, ni mot de
+    passe — et le lot continue.
+    """
+
+    identifiant_fichier: str
+    graphies: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TravailCompte:
+    """Tout ce que l'outil va faire à un compte, en un seul objet.
+
+    Un seul objet et non deux listes parallèles : la boucle d'écriture reste unique, et
+    le point d'arrêt reste où la v1 l'a posé, entre deux comptes.
+
+    `identifiant_cible` est la graphie sous laquelle le boîtier sera adressé : celle
+    qu'il a rendue pour un compte déjà présent, celle du fichier pour un compte à créer
+    — la seule disponible alors.
+    """
+
+    utilisateur: Utilisateur
+    identifiant_cible: str
+    a_creer: bool
+    adhesions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Plan:
-    comptes_a_creer: tuple[Utilisateur, ...]
-    comptes_ignores: tuple[Utilisateur, ...]
+    """Orphelins et membres non rattachés sont des **nombres** : aucun nom ne survit à
+    la construction du plan, donc rien ne peut réimprimer une liste de 500 comptes
+    au-dessus de ce sur quoi l'opérateur doit se prononcer."""
+
+    travaux: tuple[TravailCompte, ...]
     groupes_a_creer: tuple[GroupeACreer, ...]
-    orphelins: tuple[str, ...]
+    nombre_orphelins: int
+    nombre_membres_non_rattaches: int
+    groupes_ambigus: tuple[GroupeAmbigu, ...]
+    comptes_ambigus: tuple[CompteAmbigu, ...]
     domaine: str
 
+    @property
+    def creations(self) -> tuple[TravailCompte, ...]:
+        return tuple(travail for travail in self.travaux if travail.a_creer)
+
+    @property
+    def nombre_adhesions(self) -> int:
+        return sum(len(travail.adhesions) for travail in self.travaux)
+
     def nombre_operations(self) -> int:
-        """Écritures prévues : un USER GROUP CREATE par groupe, puis par compte
-        un USER CREATE, un USER PASSWORD et un USER GROUP ADDUSER par groupe."""
-        return len(self.groupes_a_creer) + sum(
-            2 + len(compte.groupes) for compte in self.comptes_a_creer
-        )
+        """Un USER GROUP CREATE par groupe neuf ; pour un compte à créer un USER CREATE
+        et un USER PASSWORD ; un USER GROUP ADDUSER par adhésion."""
+        return len(self.groupes_a_creer) + 2 * len(self.creations) + self.nombre_adhesions
 
 
 @dataclass(frozen=True)

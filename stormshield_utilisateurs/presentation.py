@@ -575,12 +575,16 @@ def lignes_du_plan(plan: Plan) -> list[str]:
             for groupe in plan.groupes_a_creer
         )
         lignes.append(f"Groupes à créer : {details}")
-    for compte in plan.comptes_a_creer:
-        rattachement = f", rattaché à {', '.join(compte.groupes)}" if compte.groupes else ""
-        lignes.append(f"{compte.identifiant} : à créer{rattachement}")
-    lignes.extend(f"{compte.identifiant} : déjà présent, ignoré" for compte in plan.comptes_ignores)
-    if plan.orphelins:
-        lignes.append(f"Orphelins sur le boîtier : {', '.join(plan.orphelins)}")
+    for travail in plan.travaux:
+        if travail.a_creer:
+            rattachement = (
+                f", rattaché à {', '.join(travail.adhesions)}" if travail.adhesions else ""
+            )
+            lignes.append(f"{travail.identifiant_cible} : à créer{rattachement}")
+        else:
+            lignes.append(f"{travail.identifiant_cible} : présent")
+    if plan.nombre_orphelins:
+        lignes.append(f"Orphelins sur le boîtier : {plan.nombre_orphelins}")
     return lignes
 
 
@@ -603,7 +607,7 @@ def texte_de_confirmation_du_lot(hote: str, plan: Plan) -> str:
     """
     parties = [
         f"Ce lot va écrire sur le firewall {hote}.",
-        f"{_accord(len(plan.comptes_a_creer), 'compte à créer', 'comptes à créer')}, "
+        f"{_accord(len(plan.creations), 'compte à créer', 'comptes à créer')}, "
         f"{_accord(len(plan.groupes_a_creer), 'groupe neuf', 'groupes neufs')}.",
     ]
     if plan.groupes_a_creer:

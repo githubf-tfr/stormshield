@@ -134,7 +134,7 @@ def test_un_lot_reel_demande_confirmation_sur_le_plan_avant_toute_ecriture() -> 
         return True
 
     _lancer(boitier, [_utilisateur("dupont", "compta_bis")], confirmer=accorder)
-    assert [compte.identifiant for compte in vus[0].comptes_a_creer] == ["dupont"]
+    assert [travail.identifiant_cible for travail in vus[0].creations] == ["dupont"]
     assert [(groupe.nom, groupe.nombre_membres) for groupe in vus[0].groupes_a_creer] == [
         ("compta_bis", 1)
     ]
@@ -179,8 +179,8 @@ def test_simulation_lit_mais_n_ecrit_pas() -> None:
     }
     assert rapport.comptes_crees == []
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
-    assert [compte.identifiant for compte in plans[0].plan.comptes_a_creer] == ["dupont"]
-    assert plans[0].plan.orphelins == ("martin",)
+    assert [travail.identifiant_cible for travail in plans[0].plan.creations] == ["dupont"]
+    assert plans[0].plan.nombre_orphelins == 1
 
 
 def test_aucun_mot_de_passe_genere_en_simulation() -> None:
@@ -343,10 +343,11 @@ def test_reconnexion_reconstruit_le_plan_au_lieu_de_rejouer() -> None:
     assert rapport.interrompu is False
     # Le plan reconstruit range legrand en « déjà présent ».
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
-    assert [compte.identifiant for compte in plans[-1].plan.comptes_ignores] == [
-        "dupont",
-        "legrand",
-    ]
+    assert [
+        travail.identifiant_cible
+        for travail in plans[-1].plan.travaux
+        if not travail.a_creer
+    ] == ["dupont", "legrand"]
     # La barre reste cohérente : le total suit le plan reconstruit.
     derniere = _progressions(evenements)[-1]
     assert derniere.accomplies == derniere.total
@@ -364,7 +365,7 @@ def test_executer_transmet_les_rejets_a_la_construction_du_plan() -> None:
         rejets=[Rejet(ligne=3, identifiant="martin", motif="prenom vide")],
     )
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
-    assert plans[0].plan.orphelins == ()
+    assert plans[0].plan.nombre_orphelins == 0
 
 
 def test_la_reconstruction_du_plan_apres_reconnexion_transmet_aussi_les_rejets() -> None:
@@ -388,7 +389,7 @@ def test_la_reconstruction_du_plan_apres_reconnexion_transmet_aussi_les_rejets()
     )
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
     assert len(plans) == 2  # le plan reconstruit après la coupure, pas le premier
-    assert plans[-1].plan.orphelins == ()
+    assert plans[-1].plan.nombre_orphelins == 0
 
 
 def test_coupure_entre_la_creation_et_le_mot_de_passe_laisse_une_trace() -> None:
@@ -583,7 +584,9 @@ def test_reprise_les_comptes_deja_crees_sont_ignores() -> None:
     rapport, evenements = _lancer(boitier, [_utilisateur("dupont"), _utilisateur("legrand")])
     assert [compte.identifiant for compte in rapport.comptes_crees] == ["legrand"]
     plans = [evenement for evenement in evenements if isinstance(evenement, PlanPret)]
-    assert [compte.identifiant for compte in plans[0].plan.comptes_ignores] == ["dupont"]
+    assert [
+        travail.identifiant_cible for travail in plans[0].plan.travaux if not travail.a_creer
+    ] == ["dupont"]
 
 
 def test_progression_en_simulation_couvre_les_seules_lectures() -> None:

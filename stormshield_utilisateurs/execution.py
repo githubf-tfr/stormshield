@@ -24,8 +24,10 @@ from stormshield_utilisateurs.modele import (
     PolitiqueMotDePasse,
     Rapport,
     Rejet,
+    TravailCompte,
     Utilisateur,
 )
+from stormshield_utilisateurs.rapprochement import IndexBoitier
 
 # CONFIG LDAP LIST, CONFIG PASSWDPOLICY SHOW, USER LIST, USER GROUP LIST.
 NOMBRE_LECTURES = 4
@@ -83,8 +85,8 @@ def lire_etat(boitier: Boitier) -> EtatBoitier:
     return EtatBoitier(
         domaine=annuaires[0],
         plancher=plancher,
-        utilisateurs=frozenset(boitier.lister_utilisateurs()),
-        groupes=frozenset(boitier.lister_groupes()),
+        comptes=IndexBoitier.depuis(boitier.lister_utilisateurs()),
+        groupes=IndexBoitier.depuis(boitier.lister_groupes()),
     )
 
 
@@ -248,6 +250,9 @@ class _Refuses:
 
     comptes: set[str] = field(default_factory=set)
     groupes: set[str] = field(default_factory=set)
+    # (identifiant visé, groupe visé) : un refus d'adhésion ne se rejoue pas plus qu'un
+    # refus de création.
+    adhesions: set[tuple[str, str]] = field(default_factory=set)
 
 
 class _Compteur:
@@ -319,7 +324,7 @@ def executer(
             plan_courant = construction_plan.construire(utilisateurs, etat, rejets)
             # Figé ici : un plan reconstruit après reconnexion ne compte plus que le
             # reste, et le bilan d'un arrêt doit se dire contre ce qui était prévu.
-            rapport.comptes_prevus = len(plan_courant.comptes_a_creer)
+            rapport.comptes_prevus = len(plan_courant.creations)
             compteur.fixer_total(
                 NOMBRE_LECTURES + (0 if simulation else plan_courant.nombre_operations())
             )
@@ -386,7 +391,7 @@ def _appliquer(
         accomplies_avant = compteur.accomplies
         try:
             _creer_groupes(boitier, reste, rapport, compteur, emettre, refuses, arret_demande)
-            _creer_comptes(
+            _traiter_comptes(
                 boitier, reste, politique, rapport, compteur, emettre,
                 patience, generer_mot_de_passe, refuses, arret_demande,
             )
@@ -523,16 +528,29 @@ def _replanifier(
     """
     comptes, groupes = lire_comptes_et_groupes(boitier)
     plan_reconstruit = construction_plan.construire(
-        utilisateurs, replace(etat, utilisateurs=comptes, groupes=groupes), rejets
+        utilisateurs,
+        replace(
+            etat,
+            comptes=IndexBoitier.depuis(comptes),
+            groupes=IndexBoitier.depuis(groupes),
+        ),
+        rejets,
     )
     # Ce que le boîtier a refusé ne repart pas : le refus est déjà au rapport, et le
     # rejouer le compterait une fois de plus sans rien créer.
     return replace(
         plan_reconstruit,
-        comptes_a_creer=tuple(
-            compte
-            for compte in plan_reconstruit.comptes_a_creer
-            if compte.identifiant not in refuses.comptes
+        travaux=tuple(
+            replace(
+                travail,
+                adhesions=tuple(
+                    groupe
+                    for groupe in travail.adhesions
+                    if (travail.identifiant_cible, groupe) not in refuses.adhesions
+                ),
+            )
+            for travail in plan_reconstruit.travaux
+            if travail.identifiant_cible not in refuses.comptes
         ),
         groupes_a_creer=tuple(
             groupe
@@ -582,75 +600,106 @@ def _creer_groupes(
         compteur.avancer()
 
 
-def _creer_comptes(
+def _traiter_comptes(
     boitier: Boitier, plan_courant: Plan, politique: PolitiqueMotDePasse,
     rapport: Rapport, compteur: _Compteur, emettre: Emetteur,
     patience: Patience, generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str],
     refuses: _Refuses, arret_demande: ArretDemande,
 ) -> None:
-    for utilisateur in plan_courant.comptes_a_creer:
+    """Une seule boucle sur les comptes : le point d'arrêt reste entre deux d'entre eux,
+    et le compte entamé va jusqu'à son terme, ses adhésions comprises."""
+    for travail in plan_courant.travaux:
         _verifier_arret(arret_demande)
-        try:
-            boitier.creer_utilisateur(
-                utilisateur.identifiant, utilisateur.nom, utilisateur.prenom,
-                plan_courant.domaine,
-            )
-        except ErreurCommande as erreur:
-            refuses.comptes.add(utilisateur.identifiant)
-            rapport.echecs.append(Echec(utilisateur.identifiant, "USER CREATE", str(erreur)))
-            emettre(Journal(f"{utilisateur.identifiant} : échec de création ({erreur})"))
-            # Aucun mot de passe n'a été généré : le secret n'est pas consommé.
-            # Le budget entier du compte est consommé : ni USER PASSWORD ni les
-            # USER GROUP ADDUSER n'auront lieu.
-            compteur.avancer(2 + len(utilisateur.groupes))
+        if travail.a_creer and not _creer_le_compte(
+            boitier, travail, plan_courant.domaine, politique, rapport, compteur,
+            emettre, patience, generer_mot_de_passe, refuses,
+        ):
             continue
-        compteur.avancer()
-        # Génération au moment de la création effective, jamais à la construction du plan.
-        secret = generer_mot_de_passe(politique)
-        # Le compte est inscrit au rapport dès sa création : le CSV de sortie est la
-        # liste de reprise de l'opérateur, et une coupure survenue après USER CREATE
-        # ne doit pas pouvoir effacer un compte qui existe bel et bien sur le boîtier.
-        rang = len(rapport.comptes_crees)
-        rapport.comptes_crees.append(CompteCree(utilisateur.identifiant, ""))
+        _ajouter_les_adhesions(boitier, travail, rapport, compteur, emettre, refuses)
+
+
+def _creer_le_compte(
+    boitier: Boitier, travail: TravailCompte, domaine: str,
+    politique: PolitiqueMotDePasse, rapport: Rapport, compteur: _Compteur,
+    emettre: Emetteur, patience: Patience,
+    generer_mot_de_passe: Callable[[PolitiqueMotDePasse], str], refuses: _Refuses,
+) -> bool:
+    """Crée le compte puis pose son mot de passe. Rend faux si la création a échoué.
+
+    **Seul chemin d'appel de `_definir_mot_de_passe` du module.** Un compte déjà présent
+    ne traverse jamais cette fonction : c'est ainsi, et non par une règle qu'on se
+    rappelle, que son mot de passe reste hors d'atteinte. Le secret n'est généré qu'ici,
+    après une création réussie : un compte qui n'est pas créé n'en consomme aucun.
+    """
+    try:
+        boitier.creer_utilisateur(
+            travail.identifiant_cible, travail.utilisateur.nom,
+            travail.utilisateur.prenom, domaine,
+        )
+    except ErreurCommande as erreur:
+        refuses.comptes.add(travail.identifiant_cible)
+        rapport.echecs.append(Echec(travail.identifiant_cible, "USER CREATE", str(erreur)))
+        emettre(Journal(f"{travail.identifiant_cible} : échec de création ({erreur})"))
+        # Budget entier du compte : ni USER PASSWORD ni les ADDUSER n'auront lieu.
+        compteur.avancer(2 + len(travail.adhesions))
+        return False
+    compteur.avancer()
+    secret = generer_mot_de_passe(politique)
+    # Inscrit dès la création : le CSV de sortie est la liste de reprise de l'opérateur,
+    # et une coupure survenue après USER CREATE ne doit pas effacer un compte qui existe.
+    rang = len(rapport.comptes_crees)
+    rapport.comptes_crees.append(CompteCree(travail.identifiant_cible, ""))
+    try:
+        retenu = _definir_mot_de_passe(
+            boitier, travail.identifiant_cible, secret, rapport, emettre, patience
+        )
+    except ErreurReseau:
+        _signaler_interruption(
+            rapport, emettre, travail.identifiant_cible, "USER PASSWORD",
+            "coupure réseau après la création : compte créé sans mot de passe "
+            "utilisable, à reprendre à la main",
+        )
+        emettre(CreationReussie(rapport.comptes_crees[rang]))
+        raise
+    compteur.avancer()
+    compte = CompteCree(travail.identifiant_cible, retenu)
+    rapport.comptes_crees[rang] = compte
+    emettre(Journal(f"{travail.identifiant_cible} : créé"))
+    emettre(CreationReussie(compte))
+    return True
+
+
+def _ajouter_les_adhesions(
+    boitier: Boitier, travail: TravailCompte, rapport: Rapport,
+    compteur: _Compteur, emettre: Emetteur, refuses: _Refuses,
+) -> None:
+    """Un ADDUSER refusé est signalé et le lot continue : une adhésion manquante ne rend
+    pas un compte inutilisable, et aucun réessai dédié n'est prévu."""
+    for rang, groupe in enumerate(travail.adhesions):
         try:
-            retenu = _definir_mot_de_passe(
-                boitier, utilisateur.identifiant, secret, rapport, emettre, patience
+            boitier.ajouter_membre(groupe, travail.identifiant_cible)
+        except ErreurCommande as erreur:
+            # Mémorisé comme un refus de création : le plan reconstruit après une
+            # reconnexion ne le rejoue pas, sans quoi le rapport porterait deux fois le
+            # même échec.
+            refuses.adhesions.add((travail.identifiant_cible, groupe))
+            rapport.echecs.append(
+                Echec(travail.identifiant_cible, "USER GROUP ADDUSER", str(erreur))
+            )
+            emettre(
+                Journal(f"{travail.identifiant_cible} : non rattaché à {groupe} ({erreur})")
             )
         except ErreurReseau:
+            # Contrairement à la v1, la relecture qui suit la reconnexion replanifiera
+            # ces adhésions : elle relit les membres de chaque groupe cité.
+            restants = ", ".join(travail.adhesions[rang:])
             _signaler_interruption(
-                rapport, emettre, utilisateur.identifiant, "USER PASSWORD",
-                "coupure réseau après la création : compte créé sans mot de passe "
-                "utilisable, à reprendre à la main",
+                rapport, emettre, travail.identifiant_cible, "USER GROUP ADDUSER",
+                f"coupure réseau pendant le rattachement : groupes non rattachés "
+                f"({restants}), ils seront replanifiés après reconnexion",
             )
-            emettre(CreationReussie(rapport.comptes_crees[rang]))
             raise
         compteur.avancer()
-        compte = CompteCree(utilisateur.identifiant, retenu)
-        rapport.comptes_crees[rang] = compte
-        emettre(Journal(f"{utilisateur.identifiant} : créé"))
-        emettre(CreationReussie(compte))
-        for rang_groupe, groupe in enumerate(utilisateur.groupes):
-            try:
-                boitier.ajouter_membre(groupe, utilisateur.identifiant)
-            except ErreurCommande as erreur:
-                rapport.echecs.append(
-                    Echec(utilisateur.identifiant, "USER GROUP ADDUSER", str(erreur))
-                )
-                emettre(
-                    Journal(f"{utilisateur.identifiant} : non rattaché à {groupe} ({erreur})")
-                )
-            except ErreurReseau:
-                # Le plan reconstruit ne rattrapera pas ces rattachements : il ne
-                # calcule d'ADDUSER que pour les comptes à créer, et celui-ci vient
-                # de basculer dans les comptes déjà présents.
-                restants = ", ".join(utilisateur.groupes[rang_groupe:])
-                _signaler_interruption(
-                    rapport, emettre, utilisateur.identifiant, "USER GROUP ADDUSER",
-                    f"coupure réseau pendant le rattachement : groupes non rattachés "
-                    f"({restants}), à reprendre à la main",
-                )
-                raise
-            compteur.avancer()
 
 
 def _signaler_interruption(
