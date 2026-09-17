@@ -90,13 +90,17 @@ def lire_etat(boitier: Boitier) -> EtatBoitier:
     )
 
 
-def lire_comptes_et_groupes(boitier: Boitier) -> tuple[frozenset[str], frozenset[str]]:
+def lire_comptes_et_groupes(boitier: Boitier) -> tuple[IndexBoitier, IndexBoitier]:
     """Reprise après reconnexion en milieu de lot : `USER LIST` et `USER GROUP LIST`
     seulement. Ni l'annuaire (lèverait `AnnuaireAbsent` sur un lot déjà entamé), ni
-    la politique (ne change pas pendant un lot)."""
+    la politique (ne change pas pendant un lot).
+
+    Deux index et non deux ensembles : c'est l'ordre des graphies rendues par le boîtier
+    qui tranche une collision de casse, et un `frozenset` le détruirait.
+    """
     return (
-        frozenset(boitier.lister_utilisateurs()),
-        frozenset(boitier.lister_groupes()),
+        IndexBoitier.depuis(boitier.lister_utilisateurs()),
+        IndexBoitier.depuis(boitier.lister_groupes()),
     )
 
 
@@ -528,13 +532,7 @@ def _replanifier(
     """
     comptes, groupes = lire_comptes_et_groupes(boitier)
     plan_reconstruit = construction_plan.construire(
-        utilisateurs,
-        replace(
-            etat,
-            comptes=IndexBoitier.depuis(comptes),
-            groupes=IndexBoitier.depuis(groupes),
-        ),
-        rejets,
+        utilisateurs, replace(etat, comptes=comptes, groupes=groupes), rejets
     )
     # Ce que le boîtier a refusé ne repart pas : le refus est déjà au rapport, et le
     # rejouer le compterait une fois de plus sans rien créer.

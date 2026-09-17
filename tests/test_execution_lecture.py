@@ -116,7 +116,9 @@ def test_reprise_ne_relit_que_les_comptes_et_les_groupes() -> None:
     """Après une reconnexion en milieu de lot : ni l'annuaire, ni la politique."""
     boitier = BoitierMemoire(utilisateurs=["martin"], groupes=["rh"])
     utilisateurs, groupes = lire_comptes_et_groupes(boitier)
-    assert utilisateurs == frozenset({"martin"})
-    assert groupes == frozenset({"rh"})
+    # Des index, pas des ensembles : l'ordre des graphies rendues par le boîtier est ce
+    # sur quoi se tranche une collision de casse, et un frozenset le détruirait.
+    assert utilisateurs.graphies == ("martin",)
+    assert groupes.graphies == ("rh",)
     operations = {operation for operation, _ in boitier.journal_appels}
     assert operations == {"lister_utilisateurs", "lister_groupes"}
