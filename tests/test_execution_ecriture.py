@@ -85,6 +85,10 @@ def _ecritures(boitier: BoitierMemoire) -> list[str]:
     ]
 
 
+def _rattachements(boitier: BoitierMemoire) -> list[str]:
+    return [cible for operation, cible in boitier.journal_appels if operation == "ajouter_membre"]
+
+
 def _progressions(evenements: list[Evenement]) -> list[Progression]:
     return [evenement for evenement in evenements if isinstance(evenement, Progression)]
 
@@ -513,6 +517,70 @@ def test_un_compte_refuse_n_est_pas_rejoue_apres_une_reconnexion() -> None:
               if operation == "creer_utilisateur"]
     assert appels.count("admin") == 1
     assert [echec.identifiant for echec in rapport.echecs] == ["admin"]
+
+
+def _lot_ou_un_compte_refuse_reapparait(graphie_relue: str) -> BoitierMemoire:
+    """`USER CREATE` refusé sur `jean.dupont`, coupure, puis relecture où le boîtier rend
+    ce compte sous `graphie_relue`.
+
+    Un refus « existe déjà » est le cas le plus fréquent de la v2 : le compte est bel et
+    bien là, et c'est le boîtier qui décide sous quelle casse il le rend.
+    """
+    boitier = BoitierMemoire(groupes=["compta"], membres={"compta": []})
+    coupures: list[str] = []
+
+    def refuser_jean_puis_couper(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "jean.dupont":
+            raise ErreurCommande(200, "l'utilisateur jean.dupont existe déjà")
+        if operation == "creer_utilisateur" and cible == "legrand" and not coupures:
+            coupures.append(cible)
+            boitier.utilisateurs.append(graphie_relue)
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = refuser_jean_puis_couper
+    _lancer(boitier, [_utilisateur("jean.dupont", "compta"), _utilisateur("legrand", ligne=3)])
+    return boitier
+
+
+def test_le_sort_d_un_compte_refuse_ne_depend_pas_de_la_graphie_relue() -> None:
+    """Un refus se retient sous la clé de rapprochement, jamais sous la graphie reçue.
+
+    Sur la graphie identique, le plan reconstruit écarte le travail et ses adhésions ne
+    partent jamais ; sur une graphie de casse différente, la comparaison de chaînes
+    brutes échoue et les mêmes adhésions partent. Le sort d'une écriture dépendrait alors
+    de la casse que le boîtier choisit de rendre — dans la branche dont tout le sujet est
+    l'insensibilité à la casse.
+    """
+    rendu_tel_quel = _lot_ou_un_compte_refuse_reapparait("jean.dupont")
+    rendu_sous_une_autre_casse = _lot_ou_un_compte_refuse_reapparait("Jean.Dupont")
+    assert _rattachements(rendu_tel_quel) == _rattachements(rendu_sous_une_autre_casse) == []
+
+
+def test_une_adhesion_refusee_ne_se_rejoue_pas_sous_une_autre_graphie() -> None:
+    """Même règle pour un `USER GROUP ADDUSER` refusé : sa clé peut changer de casse
+    entre deux plans, et le rapport porterait sinon deux fois le même échec — ce que la
+    spec v1 interdit au paragraphe « Échec isolé »."""
+    boitier = BoitierMemoire(
+        utilisateurs=["jean.dupont"], groupes=["compta"], membres={"compta": []}
+    )
+    coupures: list[str] = []
+
+    def refuser_compta_puis_couper(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible.startswith("compta/"):
+            raise ErreurCommande(200, "groupe compta inconnu")
+        if operation == "creer_utilisateur" and cible == "legrand" and not coupures:
+            coupures.append(cible)
+            # Même compte, autre graphie rendue par la relecture.
+            boitier.utilisateurs[0] = "Jean.Dupont"
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = refuser_compta_puis_couper
+    rapport, _ = _lancer(
+        boitier, [_utilisateur("jean.dupont", "compta"), _utilisateur("legrand", ligne=3)]
+    )
+    refus = [echec for echec in rapport.echecs if echec.operation == "USER GROUP ADDUSER"]
+    assert len(refus) == 1
+    assert _rattachements(boitier) == ["compta/jean.dupont"]
 
 
 def test_un_groupe_refuse_n_est_pas_rejoue_apres_une_reconnexion() -> None:

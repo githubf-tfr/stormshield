@@ -309,13 +309,37 @@ class _Refuses:
     Un refus n'est pas une perte de liaison : la commande a été reçue et rejetée,
     la rejouer donnerait le même verdict. Le plan reconstruit après une reconnexion
     les écarte, sans quoi le rapport porterait deux fois le même échec.
+
+    **Tout entre et ressort par la clé de rapprochement**, jamais par la graphie reçue :
+    entre le refus et la replanification, c'est le boîtier qui décide sous quelle casse
+    il rend un compte ou un groupe, et une comparaison de chaînes brutes ferait dépendre
+    le sort d'une écriture de cette casse-là. D'où les accesseurs plutôt que l'accès
+    direct aux ensembles : la clé ne doit pas être à reposer à chaque point d'appel.
     """
 
     comptes: set[str] = field(default_factory=set)
     groupes: set[str] = field(default_factory=set)
-    # (identifiant visé, groupe visé) : un refus d'adhésion ne se rejoue pas plus qu'un
-    # refus de création.
+    # (clé du compte visé, clé du groupe visé) : un refus d'adhésion ne se rejoue pas
+    # plus qu'un refus de création.
     adhesions: set[tuple[str, str]] = field(default_factory=set)
+
+    def refuser_compte(self, identifiant: str) -> None:
+        self.comptes.add(cle(identifiant))
+
+    def compte_refuse(self, identifiant: str) -> bool:
+        return cle(identifiant) in self.comptes
+
+    def refuser_groupe(self, nom: str) -> None:
+        self.groupes.add(cle(nom))
+
+    def groupe_refuse(self, nom: str) -> bool:
+        return cle(nom) in self.groupes
+
+    def refuser_adhesion(self, identifiant: str, groupe: str) -> None:
+        self.adhesions.add((cle(identifiant), cle(groupe)))
+
+    def adhesion_refusee(self, identifiant: str, groupe: str) -> bool:
+        return (cle(identifiant), cle(groupe)) in self.adhesions
 
 
 class _Compteur:
@@ -664,16 +688,16 @@ def _replanifier(
                 adhesions=tuple(
                     groupe
                     for groupe in travail.adhesions
-                    if (travail.identifiant_cible, groupe) not in refuses.adhesions
+                    if not refuses.adhesion_refusee(travail.identifiant_cible, groupe)
                 ),
             )
             for travail in plan_reconstruit.travaux
-            if travail.identifiant_cible not in refuses.comptes
+            if not refuses.compte_refuse(travail.identifiant_cible)
         ),
         groupes_a_creer=tuple(
             groupe
             for groupe in plan_reconstruit.groupes_a_creer
-            if groupe.nom not in refuses.groupes
+            if not refuses.groupe_refuse(groupe.nom)
         ),
     )
 
@@ -709,7 +733,7 @@ def _creer_groupes(
         try:
             boitier.creer_groupe(groupe.nom)
         except ErreurCommande as erreur:
-            refuses.groupes.add(groupe.nom)
+            refuses.refuser_groupe(groupe.nom)
             rapport.echecs.append(Echec(groupe.nom, "USER GROUP CREATE", str(erreur)))
             emettre(Journal(f"groupe {groupe.nom} : échec de création ({erreur})"))
         else:
@@ -755,7 +779,7 @@ def _creer_le_compte(
             travail.utilisateur.prenom, domaine,
         )
     except ErreurCommande as erreur:
-        refuses.comptes.add(travail.identifiant_cible)
+        refuses.refuser_compte(travail.identifiant_cible)
         rapport.echecs.append(Echec(travail.identifiant_cible, "USER CREATE", str(erreur)))
         emettre(Journal(f"{travail.identifiant_cible} : échec de création ({erreur})"))
         # Budget entier du compte : ni USER PASSWORD ni les ADDUSER n'auront lieu.
@@ -800,7 +824,7 @@ def _ajouter_les_adhesions(
             # Mémorisé comme un refus de création : le plan reconstruit après une
             # reconnexion ne le rejoue pas, sans quoi le rapport porterait deux fois le
             # même échec.
-            refuses.adhesions.add((travail.identifiant_cible, groupe))
+            refuses.refuser_adhesion(travail.identifiant_cible, groupe)
             rapport.echecs.append(
                 Echec(travail.identifiant_cible, "USER GROUP ADDUSER", str(erreur))
             )
