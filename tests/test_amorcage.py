@@ -67,6 +67,26 @@ def test_le_point_d_entree_n_importe_rien_du_paquet_au_niveau_module() -> None:
     assert not [nom for nom in importes if nom.startswith("stormshield_utilisateurs")]
 
 
+def test_le_mot_de_passe_n_est_atteignable_que_depuis_la_creation_d_un_compte() -> None:
+    """Un compte déjà présent ne doit jamais voir son mot de passe touché, et c'est la
+    structure du module qui doit l'interdire : `_definir_mot_de_passe` n'a qu'un seul
+    appelant, `_creer_le_compte`, qui n'est lui-même atteint qu'après avoir constaté
+    qu'un compte est à créer.
+    """
+    source = Path(stormshield_utilisateurs.__file__).with_name("execution.py")
+    arbre = ast.parse(source.read_text(encoding="utf-8"))
+    appelants = {
+        fonction.name
+        for fonction in ast.walk(arbre)
+        if isinstance(fonction, ast.FunctionDef)
+        for appel in ast.walk(fonction)
+        if isinstance(appel, ast.Call)
+        and isinstance(appel.func, ast.Name)
+        and appel.func.id == "_definir_mot_de_passe"
+    }
+    assert appelants == {"_creer_le_compte"}
+
+
 @pytest.mark.firewall
 def test_exige_un_boitier() -> None:
     """Sentinelle : collectée seulement avec `pytest -m firewall`."""
