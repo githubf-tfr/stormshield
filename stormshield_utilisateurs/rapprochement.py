@@ -77,11 +77,24 @@ class IndexBoitier:
 
     @classmethod
     def depuis(cls, noms: Iterable[str]) -> "IndexBoitier":
-        rendues = tuple(noms)
+        """Une graphie rendue deux fois n'entre qu'une fois : c'est une seule identité.
+
+        Que serverd puisse répéter une ligne n'est pas prouvé, mais l'aplatissement des
+        sections d'une réponse le rend possible, et la conserver deux fois donnait une
+        fausse ambiguïté — le compte ne recevait plus rien, sur un message annonçant
+        deux graphies identiques — et un orphelin compté deux fois. Le dédoublonnage
+        porte sur la graphie exacte, jamais sur la clé : deux casses distinctes restent
+        deux identités du boîtier.
+        """
         par_cle: dict[str, tuple[str, ...]] = {}
-        for nom in rendues:
-            par_cle[cle(nom)] = (*par_cle.get(cle(nom), ()), nom)
-        return cls(par_cle=par_cle, graphies=rendues)
+        rendues: list[str] = []
+        for nom in noms:
+            connues = par_cle.get(cle(nom), ())
+            if nom in connues:
+                continue
+            par_cle[cle(nom)] = (*connues, nom)
+            rendues.append(nom)
+        return cls(par_cle=par_cle, graphies=tuple(rendues))
 
     @property
     def cles(self) -> frozenset[str]:

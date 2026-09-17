@@ -86,6 +86,27 @@ def test_l_index_conserve_toutes_les_graphies_rendues() -> None:
     assert index.cles == frozenset({"jean.dupont", "martin"})
 
 
+def test_une_graphie_rendue_deux_fois_ne_fait_pas_une_ambiguite() -> None:
+    """Deux fois la même graphie, c'est une seule identité — pas un doublon de casse.
+
+    Que serverd puisse répéter une ligne n'est pas prouvé, mais l'aplatissement des
+    sections d'une réponse le rend possible. Sans ce dédoublonnage l'échec est sûr, et
+    surtout incompréhensible : le compte ne reçoit rien, et le journal annonce « le
+    boîtier en porte 2 graphies (Jean.Dupont, Jean.Dupont) ».
+    """
+    index = IndexBoitier.depuis(("Jean.Dupont", "Jean.Dupont"))
+    assert index.resoudre("jean.dupont") == Reconnu("Jean.Dupont")
+    assert index.graphies == ("Jean.Dupont",)
+
+
+def test_une_graphie_repetee_ne_masque_pas_une_vraie_ambiguite() -> None:
+    """Le dédoublonnage porte sur la graphie exacte, jamais sur la clé : deux casses
+    distinctes restent deux comptes du boîtier, répétées ou non."""
+    index = IndexBoitier.depuis(("Compta", "COMPTA", "Compta"))
+    assert index.resoudre("compta") == Ambigu(("COMPTA", "Compta"))
+    assert index.graphies == ("Compta", "COMPTA")
+
+
 def test_un_index_vide_ne_reconnait_rien() -> None:
     assert IndexBoitier.depuis(()).resoudre("compta") == Absent()
 

@@ -298,6 +298,13 @@ def test_un_compte_dont_la_ligne_a_ete_rejetee_n_est_pas_orphelin() -> None:
     assert plan.nombre_orphelins == 0
 
 
+def test_une_graphie_rendue_deux_fois_ne_compte_qu_un_orphelin() -> None:
+    """Un compte du boîtier rendu deux fois reste un compte : le compteur dit combien de
+    comptes le fichier ne cite pas, pas combien de lignes la réponse portait."""
+    plan = construire([utilisateur("dupont")], _etat(comptes=("dupont", "martin", "martin")))
+    assert plan.nombre_orphelins == 1
+
+
 def test_un_orphelin_est_reconnu_malgre_la_casse() -> None:
     plan = construire([utilisateur("jean.dupont")], _etat(comptes=("Jean.Dupont",)))
     assert plan.nombre_orphelins == 0
