@@ -1,11 +1,21 @@
 """Boîtier en mémoire : support de la totalité des tests métier, aucun réseau."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 
 from stormshield_utilisateurs.boitier import ErreurCommande
 from stormshield_utilisateurs.modele import PlancherPolitique
 
 PLANCHER_PAR_DEFAUT = PlancherPolitique(longueur_min=12, nombre_classes_min=3, entropie_min=0)
+
+# Forme supposée du DN rendu par USER GROUP SHOW (spec v2, « Points non vérifiés »,
+# point 1). Le double la reproduit telle quelle : c'est elle que le rapprochement doit
+# savoir lire, et c'est elle qu'un boîtier réel démentira ou confirmera.
+SUFFIXE_DN = "ou=users,dc=interne,dc=local"
+
+
+def dn_de(identifiant: str) -> str:
+    """Le DN sous lequel le double rend un compte qu'il connaît."""
+    return f"uid={identifiant},{SUFFIXE_DN}"
 
 
 def _sans_panne(operation: str, cible: str) -> None:
@@ -21,12 +31,17 @@ class BoitierMemoire:
         groupes: Iterable[str] = (),
         annuaires: Iterable[str] = ("interne.local",),
         plancher: PlancherPolitique = PLANCHER_PAR_DEFAUT,
+        membres: Mapping[str, Iterable[str]] | None = None,
     ) -> None:
         self.utilisateurs: list[str] = list(utilisateurs)
         self.groupes: list[str] = list(groupes)
         self.annuaires: list[str] = list(annuaires)
         self.plancher = plancher
-        self.membres: dict[str, list[str]] = {}
+        # Les valeurs sont des DN, jamais des identifiants : le double doit pouvoir
+        # mettre en défaut un code qui confondrait les deux.
+        self.membres: dict[str, list[str]] = {
+            groupe: list(dns) for groupe, dns in (membres or {}).items()
+        }
         self.mots_de_passe: dict[str, str] = {}
         self.connecte = False
         self.connexions = 0
@@ -106,4 +121,11 @@ class BoitierMemoire:
         self._appel("ajouter_membre", f"{groupe}/{identifiant}")
         if groupe not in self.groupes:
             raise ErreurCommande(200, f"groupe {groupe} inconnu")
-        self.membres.setdefault(groupe, []).append(identifiant)
+        self.membres.setdefault(groupe, []).append(dn_de(identifiant))
+
+    def lister_membres(self, groupe: str) -> list[str]:
+        """USER GROUP SHOW : les DN des membres. Graphie exacte exigée."""
+        self._appel("lister_membres", groupe)
+        if groupe not in self.groupes:
+            raise ErreurCommande(200, f"groupe {groupe} inconnu")
+        return list(self.membres.get(groupe, []))
