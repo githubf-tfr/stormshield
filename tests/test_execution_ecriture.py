@@ -235,6 +235,41 @@ def test_aucun_mot_de_passe_genere_quand_la_creation_echoue() -> None:
     assert rapport.echecs[0].operation == "USER CREATE"
 
 
+def test_un_refus_de_creation_nomme_au_journal_les_adhesions_non_tentees() -> None:
+    """En v1 un refus emportait les adhésions en silence, et c'était juste : sans
+    création, pas d'adhésion. En v2 un refus « existe déjà » prouve au contraire que le
+    compte est là, donc que ses adhésions sont du travail légitime — et rien ne disait
+    lesquelles n'avaient pas été tentées. Le rapport annonçait « 1 échec » et le journal
+    ne parlait que de la création : les deux adhésions écartées n'apparaissaient nulle
+    part, et l'opérateur n'avait pas de quoi les reprendre."""
+    boitier = BoitierMemoire(groupes=["compta", "rh"], membres={"compta": [], "rh": []})
+
+    def refuser_b(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "b":
+            raise ErreurCommande(200, "l'utilisateur b existe déjà")
+
+    boitier.declencheur = refuser_b
+    _, evenements = _lancer(boitier, [_utilisateur("b", "compta", "rh")])
+    assert (
+        "b : adhésions non tentées, le compte n'ayant pas été créé — compta, rh"
+        in _textes(evenements)
+    )
+
+
+def test_un_refus_de_creation_sans_adhesion_ne_parle_pas_d_adhesions() -> None:
+    """La ligne ne doit pas s'écrire pour rien : le cas le plus fréquent d'un premier lot
+    est le CSV sans colonne de groupes."""
+    boitier = BoitierMemoire()
+
+    def refuser(operation: str, _cible: str) -> None:
+        if operation == "creer_utilisateur":
+            raise ErreurCommande(200, "uid interdit")
+
+    boitier.declencheur = refuser
+    _, evenements = _lancer(boitier, [_utilisateur("admin")])
+    assert not any("adhésions non tentées" in texte for texte in _textes(evenements))
+
+
 def test_echec_isole_n_arrete_pas_le_lot() -> None:
     boitier = BoitierMemoire()
 

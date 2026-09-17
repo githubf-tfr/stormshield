@@ -782,6 +782,20 @@ def _creer_le_compte(
         refuses.refuser_compte(travail.identifiant_cible)
         rapport.echecs.append(Echec(travail.identifiant_cible, "USER CREATE", str(erreur)))
         emettre(Journal(f"{travail.identifiant_cible} : échec de création ({erreur})"))
+        if travail.adhesions:
+            # En v1, un refus emportait les adhésions en silence et c'était juste : sans
+            # création, pas d'adhésion. En v2 un refus « existe déjà » prouve au
+            # contraire que le compte est là, donc que ses adhésions sont du travail
+            # légitime. Les tenter quand même est une décision de conception qui n'est
+            # pas prise ici ; les taire, en revanche, laissait l'opérateur sans rien
+            # pour les reprendre — le rapport ne comptait qu'un échec, celui de la
+            # création.
+            emettre(
+                Journal(
+                    f"{travail.identifiant_cible} : adhésions non tentées, le compte "
+                    f"n'ayant pas été créé — {', '.join(travail.adhesions)}"
+                )
+            )
         # Budget entier du compte : ni USER PASSWORD ni les ADDUSER n'auront lieu.
         compteur.avancer(2 + len(travail.adhesions))
         return False
