@@ -9,6 +9,7 @@ fenêtre elle-même relève du cahier de recette.
 import ast
 import queue
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -30,9 +31,11 @@ from stormshield_utilisateurs.execution import (
     Termine,
 )
 from stormshield_utilisateurs.modele import (
+    CompteAmbigu,
     CompteCree,
     Echec,
     GroupeACreer,
+    GroupeAmbigu,
     MotifArret,
     Plan,
     PlancherPolitique,
@@ -522,6 +525,11 @@ def test_l_avertissement_de_perte_s_accorde_au_singulier() -> None:
     assert "1 mot de passe n'a pas" in avertissement_perte_de_secrets(1)
 
 
+def test_l_avertissement_de_perte_ne_parle_plus_de_compte_ignore() -> None:
+    """Un compte déjà présent n'est plus « ignoré » : il peut recevoir des adhésions."""
+    assert "ignoré" not in avertissement_perte_de_secrets(2)
+
+
 def test_rien_a_perdre_ne_pose_aucune_question_a_la_fermeture() -> None:
     """None = la fenêtre se ferme sans rien demander."""
     assert (
@@ -672,29 +680,113 @@ def _plan(
     )
 
 
-def test_le_plan_annonce_groupes_comptes_presents_et_orphelins() -> None:
-    plan = _plan(
-        _travail("dupont", "compta_bis"),
-        _travail("legrand", a_creer=False),
-        groupes=(GroupeACreer("compta_bis", 1),),
-        nombre_orphelins=1,
+def _plan_vide() -> Plan:
+    return Plan(
+        travaux=(),
+        groupes_a_creer=(),
+        nombre_orphelins=0,
+        nombre_membres_non_rattaches=0,
+        groupes_ambigus=(),
+        comptes_ambigus=(),
+        domaine="interne.local",
+    )
+
+
+def _plan_de_confirmation() -> Plan:
+    """12 comptes à créer, 1 groupe neuf, 31 adhésions — l'exemple de la spec.
+
+    Sept comptes à trois groupes et cinq à deux : 7 × 3 + 5 × 2 = 31.
+    """
+    groupes = [("compta", "rh", "compta_bis")] * 7 + [("compta", "rh")] * 5
+    travaux = tuple(
+        TravailCompte(
+            utilisateur(f"compte{rang}", *noms), f"compte{rang}", True, noms
+        )
+        for rang, noms in enumerate(groupes)
+    )
+    return replace(
+        _plan_vide(),
+        travaux=travaux,
+        groupes_a_creer=(GroupeACreer("compta_bis", 7),),
+    )
+
+
+def test_le_plan_dit_par_compte_ce_qui_lui_arrive() -> None:
+    plan = Plan(
+        travaux=(
+            TravailCompte(utilisateur("dupont", "compta", "rh"), "dupont", True,
+                          ("compta", "rh")),
+            TravailCompte(utilisateur("jean.dupont"), "Jean.Dupont", False, ("rh",)),
+            TravailCompte(utilisateur("legrand"), "legrand", False, ()),
+        ),
+        groupes_a_creer=(GroupeACreer("compta_bis", 1),),
+        nombre_orphelins=480,
+        nombre_membres_non_rattaches=0,
+        groupes_ambigus=(),
+        comptes_ambigus=(),
+        domaine="interne.local",
     )
     assert lignes_du_plan(plan) == [
         "Groupes à créer : compta_bis (1 membre)",
-        "dupont : à créer, rattaché à compta_bis",
+        "dupont : à créer, rattaché à compta, rh",
+        "Jean.Dupont : présent — ajouté à rh",
         "legrand : présent — rien à faire",
-        "1 compte du boîtier ne figure pas dans le fichier : il ne sera pas touché.",
+        "480 comptes du boîtier ne figurent pas dans le fichier : "
+        "ils ne seront pas touchés.",
     ]
 
 
-def test_l_accord_de_membre_suit_le_nombre_de_membres() -> None:
-    plan = _plan(groupes=(GroupeACreer("rh", 3), GroupeACreer("compta", 1)))
-    assert lignes_du_plan(plan) == ["Groupes à créer : rh (3 membres), compta (1 membre)"]
+def test_un_seul_orphelin_s_annonce_au_singulier() -> None:
+    assert lignes_du_plan(replace(_plan_vide(), nombre_orphelins=1)) == [
+        "1 compte du boîtier ne figure pas dans le fichier : il ne sera pas touché."
+    ]
 
 
-def test_un_plan_sans_groupe_ni_orphelin_n_annonce_ni_l_un_ni_l_autre() -> None:
-    plan = _plan(_travail("dupont"))
-    assert lignes_du_plan(plan) == ["dupont : à créer"]
+def test_aucun_orphelin_n_annonce_rien() -> None:
+    assert lignes_du_plan(_plan_vide()) == []
+
+
+def test_les_membres_non_rattaches_ont_leur_ligne_quand_ils_existent() -> None:
+    """Sans elle, un lot qui réémet les mêmes ADDUSER a toutes les apparences d'un lot
+    qui réussit."""
+    plan = replace(_plan_vide(), nombre_membres_non_rattaches=7)
+    assert lignes_du_plan(plan) == [
+        "7 membres de groupes n'ont pas pu être reconnus : les adhésions "
+        "correspondantes seront renvoyées à chaque exécution."
+    ]
+
+
+def test_aucun_membre_non_rattache_n_annonce_rien() -> None:
+    """Zéro sur un boîtier sain : la ligne du canari ne doit pas s'afficher pour rien,
+    sans quoi elle perdrait tout pouvoir d'alerte. Le plan porte ici des orphelins, pour
+    que ce test échoue si la ligne des non-rattachés s'ajoutait à un rendu non vide —
+    ce qu'un plan entièrement vide ne prouverait pas."""
+    assert lignes_du_plan(replace(_plan_vide(), nombre_orphelins=3)) == [
+        "3 comptes du boîtier ne figurent pas dans le fichier : ils ne seront pas touchés."
+    ]
+
+
+def test_une_collision_de_casse_est_dite_en_clair() -> None:
+    plan = replace(
+        _plan_vide(), groupes_ambigus=(GroupeAmbigu("compta", ("Compta", "COMPTA")),)
+    )
+    assert lignes_du_plan(plan) == [
+        "groupe compta : le boîtier en porte 2 graphies (Compta, COMPTA) — aucun "
+        "compte n'y sera rattaché, le doublon se lève à la main sur le boîtier."
+    ]
+
+
+def test_une_collision_de_casse_entre_comptes_est_dite_en_clair() -> None:
+    """Même signalement que pour un groupe : ni destructeur, ni bloquant."""
+    plan = replace(
+        _plan_vide(),
+        comptes_ambigus=(CompteAmbigu("jean.dupont", ("Jean.Dupont", "JEAN.DUPONT")),),
+    )
+    assert lignes_du_plan(plan) == [
+        "compte jean.dupont : le boîtier en porte 2 graphies (Jean.Dupont, "
+        "JEAN.DUPONT) — rien ne lui sera fait, le doublon se lève à la main sur le "
+        "boîtier."
+    ]
 
 
 # --- fabrique de production du boîtier ------------------------------------
@@ -803,6 +895,30 @@ def test_la_confirmation_sans_groupe_neuf_ne_parle_pas_de_groupes() -> None:
     assert "1 compte à créer, 0 groupe neuf." in texte
     assert "Groupes à créer" not in texte
     assert "seul membre" not in texte
+
+
+def test_la_confirmation_annonce_les_adhesions_a_ajouter() -> None:
+    """Le seul endroit où l'opérateur voit, avant qu'elle ne parte, l'ampleur de ce que
+    l'outil va poser sur des comptes qu'il n'a pas créés."""
+    texte = texte_de_confirmation_du_lot("10.0.0.1", _plan_de_confirmation())
+    assert "12 comptes à créer, 1 groupe neuf." in texte
+    assert "31 adhésions à ajouter." in texte
+
+
+def test_la_confirmation_promet_qu_aucun_retrait_n_aura_lieu() -> None:
+    texte = texte_de_confirmation_du_lot("10.0.0.1", _plan_de_confirmation())
+    assert (
+        "Cet outil n'enlève rien : aucun compte supprimé ni désactivé, aucune "
+        "appartenance de groupe retirée." in texte
+    )
+
+
+def test_une_seule_adhesion_s_annonce_au_singulier() -> None:
+    plan = replace(
+        _plan_vide(),
+        travaux=(TravailCompte(utilisateur("legrand"), "legrand", False, ("rh",)),),
+    )
+    assert "1 adhésion à ajouter." in texte_de_confirmation_du_lot("10.0.0.1", plan)
 
 
 def test_la_demande_porte_son_texte_et_debloque_le_fil_sur_la_reponse() -> None:
@@ -919,6 +1035,7 @@ def test_le_bilan_d_un_arret_demande_compte_les_crees_et_les_non_touches() -> No
         interrompu=True,
         motif_arret=MotifArret.OPERATEUR,
         comptes_prevus=200,
+        plan_construit=True,
     )
     assert lignes_du_rapport(rapport)[:4] == [
         "Arrêt demandé.",
@@ -935,6 +1052,7 @@ def test_le_bilan_d_un_arret_demande_s_accorde_au_singulier() -> None:
         interrompu=True,
         motif_arret=MotifArret.OPERATEUR,
         comptes_prevus=2,
+        plan_construit=True,
     )
     assert lignes_du_rapport(rapport)[:4] == [
         "Arrêt demandé.",
@@ -951,6 +1069,7 @@ def test_le_bilan_d_un_arret_demande_ne_promet_rien_quand_aucun_compte_n_est_ne(
         interrompu=True,
         motif_arret=MotifArret.OPERATEUR,
         comptes_prevus=200,
+        plan_construit=True,
     )
     assert lignes_du_rapport(rapport)[:4] == [
         "Arrêt demandé.",
@@ -967,8 +1086,23 @@ def test_le_bilan_d_un_arret_demande_ne_parle_pas_de_zero_restant() -> None:
         interrompu=True,
         motif_arret=MotifArret.OPERATEUR,
         comptes_prevus=0,
+        plan_construit=True,
     )
     assert lignes_du_rapport(rapport)[2] == "Aucun compte ne restait à créer."
+
+
+def test_le_bilan_d_un_arret_pendant_la_lecture_ne_dit_rien_du_reste_a_creer() -> None:
+    """Le plan n'était pas construit : rien n'avait été compté, donc rien ne peut être
+    dit de ce qui restait à créer. « Aucun compte ne restait à créer » se lirait comme
+    « le fichier n'apportait rien », et le CSV en portait."""
+    rapport = Rapport(interrompu=True, motif_arret=MotifArret.OPERATEUR)
+    assert lignes_du_rapport(rapport)[:4] == [
+        "Arrêt demandé.",
+        "Le lot s'est arrêté pendant la lecture de l'état du firewall : aucun plan "
+        "n'a été construit.",
+        "Rien n'a été écrit sur le firewall.",
+        "Relancez quand vous voulez : le lot repartira de la première lecture.",
+    ]
 
 
 def test_le_bilan_d_un_arret_demande_detaille_quand_meme_les_echecs() -> None:
@@ -980,6 +1114,7 @@ def test_le_bilan_d_un_arret_demande_detaille_quand_meme_les_echecs() -> None:
         interrompu=True,
         motif_arret=MotifArret.OPERATEUR,
         comptes_prevus=3,
+        plan_construit=True,
     )
     lignes = lignes_du_rapport(rapport)
     assert "dupont — USER PASSWORD : refusé" in lignes

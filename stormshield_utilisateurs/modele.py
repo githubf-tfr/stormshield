@@ -199,6 +199,11 @@ class Rapport:
     # se juge à ce qu'il laisse derrière lui : sans ce total, le bilan pourrait dire
     # combien de comptes sont nés, jamais combien n'ont pas été touchés.
     comptes_prevus: int = 0
+    # Le plan a-t-il seulement été construit ? Faux tant que la lecture de l'état du
+    # boîtier n'est pas allée à son terme. `comptes_prevus` vaut alors zéro faute
+    # d'avoir été compté, et non parce que le fichier n'apportait rien : le bilan d'un
+    # arrêt ne peut rien dire du reste à créer sans ce fait.
+    plan_construit: bool = False
 
     @property
     def sans_mot_de_passe(self) -> list[CompteCree]:

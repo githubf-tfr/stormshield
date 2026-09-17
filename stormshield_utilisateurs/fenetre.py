@@ -386,8 +386,9 @@ class Fenetre:
     def _confirmer_la_perte_des_secrets(self) -> bool:
         """Dernier rempart avant qu'un nouveau lot efface les mots de passe du précédent.
 
-        Les comptes existent déjà sur le boîtier : un relancement les classera « déjà
-        présent, ignoré » et ne leur redonnera jamais de mot de passe.
+        Les comptes existent déjà sur le boîtier : un relancement les verra comme déjà
+        présents, ne leur redonnera plus que leurs adhésions manquantes, et jamais de
+        mot de passe.
         """
         en_attente = self.enregistrables.secrets_en_attente
         if not en_attente:
