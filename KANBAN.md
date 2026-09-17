@@ -19,8 +19,11 @@ Tenu à la main.
   L'authentification `nsrpc` ne se réimplémente pas en REST à la main.
 - Entrée CSV `identifiant;nom;prenom;groupes`. Pas de colonne mail : `USER CREATE`
   ne la prend pas.
-- Ajout seul : jamais de suppression, jamais de modification d'un compte existant.
-  Les orphelins sont signalés, pas touchés.
+- Ajout seul : jamais de suppression, jamais de retrait d'appartenance. Un compte
+  existant n'est ni supprimé, ni désactivé, ni modifié dans ses attributs, et son mot
+  de passe reste hors d'atteinte ; depuis la v2 il reçoit les adhésions de groupe que
+  le fichier lui donne et que le boîtier n'a pas. Les orphelins sont signalés, pas
+  touchés.
 - Mots de passe générés à la création effective, politique pré-remplie depuis
   `CONFIG PASSWDPOLICY SHOW`, restitués dans un CSV choisi par l'opérateur.
 - `CONFIG LDAP INITIALIZE` n'est atteignable que si aucun annuaire ne répond —
@@ -45,6 +48,17 @@ Tenu à la main.
 
 Tous sont portés par le cahier de recette, avec le cas qui les tranche.
 
+- **La forme des membres rendus par `USER GROUP SHOW`** — seul point structurant de la
+  v2. Le nombre de membres non rattachés affiché au plan la confirme ou l'infirme dès la
+  première lecture : il vaut **zéro sur un boîtier sain**, les membres se comparant aux
+  comptes du boîtier et non au fichier (cahier de recette, cas 122, à jouer en premier).
+  Faux : l'outil réémet des `ADDUSER` redondants, sans dommage, et le repli tient dans
+  `uid_du_dn`.
+- **La forme rendue par `USER GROUP LIST`** — nom de groupe ou DN. Elle sert désormais
+  d'argument à `USER GROUP SHOW`.
+- **La coexistence de deux groupes — ou de deux comptes — que la casse seule distingue.**
+  Si elle est possible, la collision est signalée sans correspondance exacte, et ni le
+  groupe ni le compte en cause n'est touché (cas 129 et 138).
 - Longueur et caractères autorisés pour le `uid`, liste des `uid` interdits (cas 58).
 - Différence entre `USER GROUP CREATE` et `USER GROUP NEW`. `NEW` n'est utilisée nulle part.
 - Limite de sessions simultanées de l'API serverd (`SRV_RET_AUTHLIMIT`) — cas 41.
@@ -64,6 +78,29 @@ Tous sont portés par le cahier de recette, avec le cas qui les tranche.
 _(rien)_
 
 ## Terminé
+
+### Alignement sur un boîtier déjà peuplé — v2 (2026-09-17)
+
+Spec `docs/superpowers/specs/2026-09-17-boitier-peuple-design.md`, plan
+`docs/superpowers/plans/2026-09-17-boitier-peuple-plan.md`. L'invariant v1 « aucune
+modification d'un compte existant » se déplace : l'outil crée des comptes, crée des
+groupes, ajoute des adhésions — et n'enlève jamais rien.
+
+- Reconnaissance insensible à la casse des comptes **et** des groupes, avec adressage
+  systématique sous l'orthographe rendue par le boîtier (`rapprochement.py`). Une même
+  règle pour les deux : correspondance exacte d'abord, sinon l'ambiguïté est signalée et
+  rien n'est touché — jamais tranchée sur l'ordre de la liste rendue.
+- Les adhésions manquantes d'un compte déjà présent sont ajoutées ; colonne `groupes`
+  vide = « je ne me prononce pas », donc aucune adhésion.
+- Lecture d'état à `4 + g` commandes, `g` comptant les groupes cités par le fichier et
+  déjà présents ; arrêt consulté entre deux lectures d'inventaire.
+- Orphelins et membres non rattachés sont des **nombres**, jamais des listes.
+- Le mot de passe d'un compte existant est structurellement hors d'atteinte : un seul
+  appelant de `_definir_mot_de_passe`, sous garde de structure.
+- **Écarté** : le retrait d'appartenance. Un retrait sûr coûtait `4 + G + M` commandes
+  (224 pour 200 comptes sur 20 groupes) contre `4 + g` (9) — voir « Pourquoi la v2
+  n'enlève rien » dans la spec. Le signalement des divergences d'attributs tombe avec
+  lui : il était le sous-produit du `USER SHOW` par compte.
 
 ### Arrêt d'un lot en cours (2026-09-17)
 
@@ -161,3 +198,12 @@ lot entier : le garde anti-boucle comparait le plan restant à celui d'avant la 
   suivi d'une espace y est interdit, la commande devient illisible ou se scinde. Écrite en
   bloc `|` dans `exe.yml`, avec `shell: bash` — les runners Windows lancent PowerShell par
   défaut, qui ne lit pas la même syntaxe de continuation.
+- (2026-09-17) **Le compteur des membres non rattachés est aveugle à un mauvais *format*
+  de réponse, il ne détecte qu'une mauvaise *forme* de DN** : il compare les `uid` que
+  `uid_du_dn` a su extraire aux comptes connus du boîtier, mais ne voit rien si
+  `USER GROUP SHOW` rend un format inattendu, ou répète le champ `member=` sans le
+  suffixe numérique attendu (`member_2=`, `member_3=`, …) — les membres au-delà du
+  premier sont alors perdus avant même d'être comparés, et le compteur affiche zéro, lu
+  à tort comme « tout va bien ». Dans ce cas précis, seul le texte brut de la réponse
+  garde la vérité : à confronter à la trace brute dès le premier boîtier joignable, sans
+  se fier au compteur seul.
