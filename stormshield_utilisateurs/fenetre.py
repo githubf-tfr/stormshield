@@ -250,12 +250,18 @@ class Fenetre:
             anchor="w",
         ).grid(row=9, column=0, columnspan=3, sticky="w", padx=6, pady=3)
 
-        self.bouton_lancer = ttk.Button(cadre, text="Lancer", command=self._au_lancement)
-        self.bouton_lancer.grid(row=10, column=0, sticky="w", padx=6, pady=3)
+        # Sous-cadre, comme pour les cases de politique : posés dans les colonnes du
+        # cadre principal, les deux boutons seraient séparés par la largeur de la colonne
+        # des libellés — celle qui porte « Longueur des mots de passe ». Ici ils sont
+        # réellement adjacents, et rien d'autre n'occupe cette ligne.
+        boutons = ttk.Frame(cadre)
+        boutons.grid(row=10, column=0, columnspan=3, sticky="w", padx=6, pady=3)
+        self.bouton_lancer = ttk.Button(boutons, text="Lancer", command=self._au_lancement)
+        self.bouton_lancer.grid(row=0, column=0, padx=(0, 6))
         # À côté de *Lancer*, jamais à sa place : l'opérateur doit voir d'un coup d'œil
         # dans quel état est l'outil, et lequel des deux gestes lui est offert.
-        self.bouton_arreter = ttk.Button(cadre, text="Arrêter", command=self._a_l_arret)
-        self.bouton_arreter.grid(row=10, column=1, sticky="w", padx=6, pady=3)
+        self.bouton_arreter = ttk.Button(boutons, text="Arrêter", command=self._a_l_arret)
+        self.bouton_arreter.grid(row=0, column=1)
         self._appliquer_etat_des_boutons()
 
         journal = ttk.Frame(cadre)
