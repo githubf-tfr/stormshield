@@ -662,19 +662,28 @@ def _lignes_d_un_arret_demande(rapport: Rapport) -> list[str]:
     """
     crees = len(rapport.comptes_crees)
     restants = max(rapport.comptes_prevus - crees, 0)
-    deja_presents = (
-        "le compte créé sera vu comme déjà présent"
-        if crees <= 1
-        else f"les {crees} seront vus comme déjà présents"
-    )
+    # Trois formes, pas deux : zéro compte créé est le cas le plus fréquent d'un arrêt
+    # demandé — toute simulation, et tout clic tombé avant la première écriture.
+    match crees:
+        case 0:
+            relance = "aucun compte n'a été créé, le lot repartira de zéro"
+        case 1:
+            relance = "le compte créé sera vu comme déjà présent"
+        case _:
+            relance = f"les {crees} seront vus comme déjà présents"
+    match restants:
+        case 0:
+            reste = "Aucun compte ne restait à créer."
+        case 1:
+            reste = "Le compte restant n'a pas été touché."
+        case _:
+            reste = f"Les {restants} restants n'ont pas été touchés."
     return [
         "Arrêt demandé.",
         f"{_accord(crees, 'compte créé', 'comptes créés')} sur "
         f"{rapport.comptes_prevus} prévus.",
-        "Le compte restant n'a pas été touché."
-        if restants == 1
-        else f"Les {restants} restants n'ont pas été touchés.",
-        f"Relancez quand vous voulez : {deja_presents}.",
+        reste,
+        f"Relancez quand vous voulez : {relance}.",
     ]
 
 

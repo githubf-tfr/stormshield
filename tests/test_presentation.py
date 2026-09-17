@@ -938,6 +938,33 @@ def test_le_bilan_d_un_arret_demande_s_accorde_au_singulier() -> None:
     ]
 
 
+def test_le_bilan_d_un_arret_demande_ne_promet_rien_quand_aucun_compte_n_est_ne() -> None:
+    """Cas le plus fréquent : l'arrêt tombe pendant les lectures, avant la moindre
+    écriture. Le bilan ne doit pas parler d'« un compte créé » qui n'existe pas."""
+    rapport = Rapport(
+        interrompu=True,
+        motif_arret=MotifArret.OPERATEUR,
+        comptes_prevus=200,
+    )
+    assert lignes_du_rapport(rapport)[:4] == [
+        "Arrêt demandé.",
+        "0 compte créé sur 200 prévus.",
+        "Les 200 restants n'ont pas été touchés.",
+        "Relancez quand vous voulez : aucun compte n'a été créé, le lot repartira de zéro.",
+    ]
+
+
+def test_le_bilan_d_un_arret_demande_ne_parle_pas_de_zero_restant() -> None:
+    """Un plan qui ne prévoyait aucune création laisse un reste nul : « Les 0 restants »
+    se lit comme un décompte cassé."""
+    rapport = Rapport(
+        interrompu=True,
+        motif_arret=MotifArret.OPERATEUR,
+        comptes_prevus=0,
+    )
+    assert lignes_du_rapport(rapport)[2] == "Aucun compte ne restait à créer."
+
+
 def test_le_bilan_d_un_arret_demande_detaille_quand_meme_les_echecs() -> None:
     """Un arrêt ne fait pas disparaître ce qui a échoué avant lui, ni les comptes à
     reprendre à la main."""
