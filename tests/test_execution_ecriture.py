@@ -1115,6 +1115,53 @@ def test_l_arret_juste_apres_le_plan_ne_pretend_pas_qu_un_compte_est_alle_a_son_
     assert "le compte en cours" not in ligne
 
 
+def test_l_arret_apres_une_adhesion_sur_un_compte_existant_ne_pretend_pas_de_creation() -> None:
+    """Une écriture a bien eu lieu — l'ADDUSER sur dupont, déjà présent — sans qu'aucun
+    compte n'ait été créé : le second message reste celui qui s'applique, et non « avant
+    la première écriture », prédicat que ce chemin met en défaut."""
+    boitier = BoitierMemoire(utilisateurs=["dupont"], groupes=["compta"])
+    interrupteur = _Interrupteur()
+
+    def arreter_apres_l_adhesion_de_dupont(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible == "compta/dupont":
+            interrupteur.demander()
+
+    boitier.declencheur = arreter_apres_l_adhesion_de_dupont
+    rapport, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont", "compta"), _utilisateur("martin")],
+        arret=interrupteur,
+    )
+    assert boitier.membres["compta"] == [dn_de("dupont")]
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+    assert rapport.comptes_crees == []
+    (ligne,) = [texte for texte in _textes(evenements) if texte.startswith("arrêt demandé")]
+    assert "aucun compte n'a encore été créé" in ligne
+    assert "le compte en cours" not in ligne
+
+
+def test_l_arret_apres_un_compte_cree_dit_qu_il_est_alle_a_son_terme() -> None:
+    """Pendant du test précédent : ce troisième message n'était couvert par aucun test —
+    seule son absence l'était, dans les deux autres cas."""
+    boitier = BoitierMemoire()
+    interrupteur = _Interrupteur()
+
+    def arreter_apres_la_creation_de_dupont(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and cible == "dupont":
+            interrupteur.demander()
+
+    boitier.declencheur = arreter_apres_la_creation_de_dupont
+    rapport, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont"), _utilisateur("martin")],
+        arret=interrupteur,
+    )
+    assert rapport.comptes_crees != []
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+    (ligne,) = [texte for texte in _textes(evenements) if texte.startswith("arrêt demandé")]
+    assert "le compte en cours est allé à son terme" in ligne
+
+
 def test_sans_demande_d_arret_le_lot_va_jusqu_au_bout() -> None:
     """La valeur par défaut ne doit jamais arrêter quoi que ce soit : c'est le sens sûr,
     l'inverse d'une confirmation par défaut."""

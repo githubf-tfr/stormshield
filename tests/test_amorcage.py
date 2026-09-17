@@ -67,24 +67,145 @@ def test_le_point_d_entree_n_importe_rien_du_paquet_au_niveau_module() -> None:
     assert not [nom for nom in importes if nom.startswith("stormshield_utilisateurs")]
 
 
+def _appelants_du_mot_de_passe(source: str) -> dict[str, set[str]]:
+    """Pour chacune des deux façons d'atteindre l'écriture du mot de passe — le wrapper
+    du module (`_definir_mot_de_passe(...)`) et l'opération protocolaire elle-même
+    (`<objet>.definir_mot_de_passe(...)`, quel que soit l'objet qui la porte) — l'ensemble
+    des noms de fonctions de ce source dont le corps contient un tel appel.
+
+    Se fier au seul nom `_definir_mot_de_passe` laissait passer un appel direct à
+    `boitier.definir_mot_de_passe(...)` : la même opération, sans passer par le wrapper.
+    """
+    arbre = ast.parse(source)
+    appelants: dict[str, set[str]] = {"wrapper": set(), "protocole": set()}
+    for fonction in ast.walk(arbre):
+        if not isinstance(fonction, ast.FunctionDef):
+            continue
+        for appel in ast.walk(fonction):
+            if not isinstance(appel, ast.Call):
+                continue
+            cible = appel.func
+            if isinstance(cible, ast.Name) and cible.id == "_definir_mot_de_passe":
+                appelants["wrapper"].add(fonction.name)
+            elif isinstance(cible, ast.Attribute) and cible.attr == "definir_mot_de_passe":
+                appelants["protocole"].add(fonction.name)
+    return appelants
+
+
 def test_le_mot_de_passe_n_est_atteignable_que_depuis_la_creation_d_un_compte() -> None:
     """Un compte déjà présent ne doit jamais voir son mot de passe touché, et c'est la
-    structure du module qui doit l'interdire : `_definir_mot_de_passe` n'a qu'un seul
-    appelant, `_creer_le_compte`, qui n'est lui-même atteint qu'après avoir constaté
-    qu'un compte est à créer.
+    structure du module qui doit l'interdire, sur les deux façons de l'atteindre :
+    `_definir_mot_de_passe`, le wrapper du module, n'a qu'un seul appelant,
+    `_creer_le_compte` — lui-même atteint qu'après avoir constaté qu'un compte est à
+    créer — et l'opération protocolaire elle-même, `<boîtier>.definir_mot_de_passe(...)`,
+    n'est appelée que depuis ce wrapper.
+
+    Ce que cette garde ne voit toujours pas : un appel par alias
+    (`f = boitier.definir_mot_de_passe; f(...)`), par `getattr`, ou toute expression dont
+    le nom n'apparaît pas littéralement en position d'appel. Le test comportemental de T4
+    reste la seule preuve que le chemin ne s'exécute jamais sur un compte existant ;
+    celui-ci ne prouve que la structure.
     """
-    source = Path(stormshield_utilisateurs.__file__).with_name("execution.py")
-    arbre = ast.parse(source.read_text(encoding="utf-8"))
-    appelants = {
-        fonction.name
-        for fonction in ast.walk(arbre)
-        if isinstance(fonction, ast.FunctionDef)
-        for appel in ast.walk(fonction)
-        if isinstance(appel, ast.Call)
-        and isinstance(appel.func, ast.Name)
-        and appel.func.id == "_definir_mot_de_passe"
-    }
-    assert appelants == {"_creer_le_compte"}
+    source = Path(stormshield_utilisateurs.__file__).with_name("execution.py").read_text(
+        encoding="utf-8"
+    )
+    appelants = _appelants_du_mot_de_passe(source)
+    assert appelants["wrapper"] == {"_creer_le_compte"}
+    assert appelants["protocole"] == {"_definir_mot_de_passe"}
+
+
+# Sources factices : jamais importées, seulement analysées — elles prouvent que la garde
+# mord, au lieu de le supposer. Forme minimale du module réel : un wrapper, son seul
+# appelant légitime, et la boucle qui traite tous les travaux, créés ou non.
+_MODULE_SAIN = """
+def _definir_mot_de_passe(boitier, identifiant, secret):
+    boitier.definir_mot_de_passe(identifiant, secret)
+    return secret
+
+
+def _creer_le_compte(boitier, travail):
+    boitier.creer_utilisateur(travail.identifiant)
+    return _definir_mot_de_passe(boitier, travail.identifiant, "secret")
+
+
+def _traiter_comptes(boitier, plan):
+    for travail in plan.travaux:
+        if travail.a_creer:
+            _creer_le_compte(boitier, travail)
+        _ajouter_les_adhesions(boitier, travail)
+
+
+def _ajouter_les_adhesions(boitier, travail):
+    for groupe in travail.adhesions:
+        boitier.ajouter_membre(groupe, travail.identifiant)
+"""
+
+_MODULE_SABOTE_PAR_L_OPERATION_PROTOCOLAIRE = """
+def _definir_mot_de_passe(boitier, identifiant, secret):
+    boitier.definir_mot_de_passe(identifiant, secret)
+    return secret
+
+
+def _creer_le_compte(boitier, travail):
+    boitier.creer_utilisateur(travail.identifiant)
+    return _definir_mot_de_passe(boitier, travail.identifiant, "secret")
+
+
+def _traiter_comptes(boitier, plan):
+    for travail in plan.travaux:
+        if travail.a_creer:
+            _creer_le_compte(boitier, travail)
+        _ajouter_les_adhesions(boitier, travail)
+
+
+def _ajouter_les_adhesions(boitier, travail):
+    boitier.definir_mot_de_passe(travail.identifiant, "sabotage")
+    for groupe in travail.adhesions:
+        boitier.ajouter_membre(groupe, travail.identifiant)
+"""
+
+_MODULE_SABOTE_PAR_UN_SECOND_APPELANT_DU_WRAPPER = """
+def _definir_mot_de_passe(boitier, identifiant, secret):
+    boitier.definir_mot_de_passe(identifiant, secret)
+    return secret
+
+
+def _creer_le_compte(boitier, travail):
+    boitier.creer_utilisateur(travail.identifiant)
+    return _definir_mot_de_passe(boitier, travail.identifiant, "secret")
+
+
+def _traiter_comptes(boitier, plan):
+    for travail in plan.travaux:
+        _definir_mot_de_passe(boitier, travail.identifiant, "sabotage")
+        if travail.a_creer:
+            _creer_le_compte(boitier, travail)
+        _ajouter_les_adhesions(boitier, travail)
+
+
+def _ajouter_les_adhesions(boitier, travail):
+    for groupe in travail.adhesions:
+        boitier.ajouter_membre(groupe, travail.identifiant)
+"""
+
+
+def test_la_garde_laisse_passer_un_module_sain() -> None:
+    appelants = _appelants_du_mot_de_passe(_MODULE_SAIN)
+    assert appelants["wrapper"] == {"_creer_le_compte"}
+    assert appelants["protocole"] == {"_definir_mot_de_passe"}
+
+
+def test_la_garde_refuse_l_appel_direct_a_l_operation_protocolaire() -> None:
+    """Le contournement démontré en revue : poser le mot de passe via l'attribut du
+    boîtier depuis la boucle des adhésions, qui traite tous les travaux — comptes déjà
+    présents compris — sans jamais passer par le wrapper du module."""
+    appelants = _appelants_du_mot_de_passe(_MODULE_SABOTE_PAR_L_OPERATION_PROTOCOLAIRE)
+    assert appelants["protocole"] == {"_definir_mot_de_passe", "_ajouter_les_adhesions"}
+
+
+def test_la_garde_refuse_un_second_appelant_du_wrapper() -> None:
+    appelants = _appelants_du_mot_de_passe(_MODULE_SABOTE_PAR_UN_SECOND_APPELANT_DU_WRAPPER)
+    assert appelants["wrapper"] == {"_creer_le_compte", "_traiter_comptes"}
 
 
 @pytest.mark.firewall

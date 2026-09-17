@@ -573,10 +573,13 @@ def _arreter_par_l_operateur(rapport: Rapport, emettre: Emetteur) -> None:
 
     Trois textes, parce que l'arrêt a désormais trois moments possibles. Avant le plan,
     aucun compte n'était en cours : dire qu'il est allé à son terme serait faux, et
-    l'opérateur chercherait dans le journal un compte qui n'existe pas. Entre le plan et
-    la première écriture — seul point d'arrêt qu'une simulation atteint, et atteignable
-    en lot réel avant la confirmation — le plan existe mais aucun compte n'a encore été
-    créé : le dire aussi serait faux, pour la même raison.
+    l'opérateur chercherait dans le journal un compte qui n'existe pas. Tant qu'aucune
+    création de compte n'a eu lieu — `rapport.comptes_crees` encore vide —, le dire serait
+    faux pour la même raison. Ce second cas ne se réduit pas à « avant la première
+    écriture » : une adhésion peut avoir été ajoutée avec succès sur un compte déjà
+    présent, sans qu'aucun compte n'ait été créé — le plan sans création est le seul
+    prédicat qui reste vrai sur ce chemin comme sur celui, plus fréquent, où rien n'a
+    encore été écrit.
     """
     _marquer_arret(rapport, MotifArret.OPERATEUR)
     if not rapport.plan_construit:
