@@ -133,8 +133,13 @@ def test_les_membres_sont_rendus_dans_l_ordre_des_indices() -> None:
     assert lire_membres(jetons) == ["uid=a,dc=l", "uid=b,dc=l", "uid=j,dc=l"]
 
 
-def test_un_groupe_sans_membre_rend_une_liste_vide() -> None:
-    """Section vide ou refus : les deux se traitent comme « aucun membre connu »."""
+def test_une_section_sans_membre_rend_une_liste_vide() -> None:
+    """Section vide ou refus : les deux se traitent comme « aucun membre connu ».
+
+    Nommée « section » et non « groupe » : `tests/test_boitier_memoire.py` porte déjà un
+    `test_un_groupe_sans_membre_rend_une_liste_vide`, et deux tests homonymes dans deux
+    fichiers rendent un rapport `-v` illisible.
+    """
     assert lire_membres({"name": "compta"}) == []
 
 
