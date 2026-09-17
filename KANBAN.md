@@ -36,9 +36,9 @@ Tenu à la main.
 ## À faire
 
 - **Exécuter `docs/recette/2026-09-16-cahier-recette-v1.md` dès qu'un boîtier est
-  joignable.** 121 cas, dont 22 jouables sans boîtier sur un poste Windows et le `.exe` de
-  la release. C'est la seule couverture de `fenetre.py` et le seul moyen de confirmer les
-  hypothèses de `boitier_sdk.py` (section F du cahier).
+  joignable.** 139 cas, dont 22 jouables sans boîtier sur un poste Windows et le `.exe` de
+  la release, et 117 exigeant un boîtier joignable. C'est la seule couverture de `fenetre.py`
+  et le seul moyen de confirmer les hypothèses de `boitier_sdk.py` (sections F et R du cahier).
 - Poser le tag `v1.0.0` pour déclencher la première construction du `.exe`. Le workflow
   `exe.yml` n'a jamais tourné : aucun runner ne l'a validé avant ce tag.
 - Spec de l'injection de blacklists : granularité (objet réseau vs groupe URL), purge ou
