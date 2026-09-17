@@ -1097,6 +1097,24 @@ def test_l_arret_pendant_l_inventaire_ne_construit_aucun_plan() -> None:
     assert "le compte en cours" not in ligne
 
 
+def test_l_arret_juste_apres_le_plan_ne_pretend_pas_qu_un_compte_est_alle_a_son_terme() -> None:
+    """Seul point d'arrêt qu'une simulation atteint, et atteignable en lot réel avant la
+    confirmation : le plan existe, mais aucun compte n'a encore été créé. Le journal ne
+    doit pas prétendre qu'un compte en cours est allé à son terme — il n'y en avait pas."""
+    boitier = BoitierMemoire()
+    rapport, evenements = _lancer(
+        boitier,
+        [_utilisateur("dupont")],
+        simulation=True,
+        arret=_Interrupteur(demande=True),
+    )
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+    assert rapport.comptes_crees == []
+    assert _ecritures(boitier) == []
+    (ligne,) = [texte for texte in _textes(evenements) if texte.startswith("arrêt demandé")]
+    assert "le compte en cours" not in ligne
+
+
 def test_sans_demande_d_arret_le_lot_va_jusqu_au_bout() -> None:
     """La valeur par défaut ne doit jamais arrêter quoi que ce soit : c'est le sens sûr,
     l'inverse d'une confirmation par défaut."""

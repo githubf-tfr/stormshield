@@ -571,9 +571,12 @@ def _verifier_arret(arret_demande: ArretDemande) -> None:
 def _arreter_par_l_operateur(rapport: Rapport, emettre: Emetteur) -> None:
     """Arrêt sur ordre : ni panne à attendre, ni erreur à corriger avant de relancer.
 
-    Deux textes, parce que l'arrêt a désormais deux moments possibles. Avant le plan,
+    Trois textes, parce que l'arrêt a désormais trois moments possibles. Avant le plan,
     aucun compte n'était en cours : dire qu'il est allé à son terme serait faux, et
-    l'opérateur chercherait dans le journal un compte qui n'existe pas.
+    l'opérateur chercherait dans le journal un compte qui n'existe pas. Entre le plan et
+    la première écriture — seul point d'arrêt qu'une simulation atteint, et atteignable
+    en lot réel avant la confirmation — le plan existe mais aucun compte n'a encore été
+    créé : le dire aussi serait faux, pour la même raison.
     """
     _marquer_arret(rapport, MotifArret.OPERATEUR)
     if not rapport.plan_construit:
@@ -582,6 +585,14 @@ def _arreter_par_l_operateur(rapport: Rapport, emettre: Emetteur) -> None:
                 "arrêt demandé pendant la lecture de l'état du firewall : aucun plan "
                 "n'a été construit, aucun compte n'a été entamé, rien n'a été écrit. "
                 "Relancer est sans danger : le lot repartira de la première lecture."
+            )
+        )
+        return
+    if not rapport.comptes_crees:
+        emettre(
+            Journal(
+                "arrêt demandé : le plan a été établi mais aucun compte n'a encore été "
+                "créé. Relancer est sans danger : le lot repartira du plan déjà établi."
             )
         )
         return
