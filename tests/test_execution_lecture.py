@@ -130,13 +130,13 @@ def test_la_lecture_vaut_quatre_commandes_plus_un_par_groupe_cite_et_present() -
     ]
 
 
-def test_l_arret_est_consulte_avant_chaque_lecture_d_inventaire() -> None:
+def test_un_arret_arme_d_avance_n_entame_aucune_lecture_d_inventaire() -> None:
     """Sans quoi le bouton *Arrêter* serait inerte pendant la phase devenue longue.
 
-    `_ArretParLOperateur` est privé et le reste : ce test est le seul à l'importer,
-    parce qu'il éprouve l'unité de lecture isolément. La preuve de bout en bout est
-    `test_l_arret_pendant_l_inventaire_ne_construit_aucun_plan`, qui ne connaît que
-    l'interface publique.
+    `_ArretParLOperateur` est privé et le reste : ce test et son jumeau ci-dessous sont
+    les seuls à l'importer, parce qu'ils éprouvent l'unité de lecture isolément. La
+    preuve de bout en bout est `test_l_arret_pendant_l_inventaire_ne_construit_aucun_plan`,
+    qui ne connaît que l'interface publique.
     """
     boitier = BoitierMemoire(groupes=["compta", "rh"])
     with pytest.raises(_ArretParLOperateur):
@@ -145,6 +145,28 @@ def test_l_arret_est_consulte_avant_chaque_lecture_d_inventaire() -> None:
             arret_demande=_Interrupteur(demande=True),
         )
     assert ("lister_membres", "compta") not in boitier.journal_appels
+
+
+def test_l_arret_est_consulte_avant_chaque_lecture_d_inventaire() -> None:
+    """Pas seulement avant la première : l'opérateur clique **pendant** la lecture de
+    `compta`, et `rh` ne doit pas partir. Un arrêt qui ne serait consulté qu'à l'entrée
+    de la boucle laisserait la phase se dérouler entière sous un bouton déjà enfoncé.
+    """
+    boitier = BoitierMemoire(groupes=["compta", "rh"])
+    interrupteur = _Interrupteur()
+
+    def cliquer_pendant_la_premiere_lecture(operation: str, cible: str) -> None:
+        if operation == "lister_membres" and cible == "compta":
+            interrupteur.demander()
+
+    boitier.declencheur = cliquer_pendant_la_premiere_lecture
+    with pytest.raises(_ArretParLOperateur):
+        lire_adhesions(
+            boitier, ("compta", "rh"), emettre=lambda _: None, arret_demande=interrupteur
+        )
+    assert [
+        cible for operation, cible in boitier.journal_appels if operation == "lister_membres"
+    ] == ["compta"]
 
 
 def test_un_groupe_dont_les_membres_sont_illisibles_ne_stoppe_pas_la_lecture() -> None:

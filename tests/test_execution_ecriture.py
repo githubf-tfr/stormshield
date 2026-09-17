@@ -610,6 +610,63 @@ def test_reprise_les_comptes_deja_crees_sont_ignores() -> None:
     ] == ["dupont"]
 
 
+def test_une_adhesion_deja_posee_n_est_pas_reposee_apres_une_reconnexion() -> None:
+    """L'inventaire relu après la coupure doit **servir** : le lire puis le jeter ferait
+    reposer les adhésions déjà passées — membres dupliqués sur le boîtier — et ferait
+    croître le total une seconde fois, après la confirmation.
+
+    `test_la_relecture_apres_reconnexion_reconstruit_tout_l_inventaire` éprouve
+    `relire_inventaire` en direct et ne reconnecte jamais : le câblage de son résultat
+    dans le plan reconstruit n'est prouvé qu'ici.
+    """
+    boitier = BoitierMemoire(utilisateurs=["alpha"], groupes=["g1", "g2"])
+    coupures: list[str] = []
+
+    def couper_apres_le_premier_rattachement(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible == "g2/alpha" and not coupures:
+            coupures.append(cible)
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = couper_apres_le_premier_rattachement
+    rapport, evenements = _lancer(boitier, [_utilisateur("alpha", "g1", "g2")])
+    assert boitier.connexions == 2
+    # g1 était posé avant la coupure : le plan reconstruit ne le replanifie pas.
+    assert boitier.journal_appels.count(("ajouter_membre", "g1/alpha")) == 1
+    assert boitier.membres["g1"] == [dn_de("alpha")]
+    assert boitier.membres["g2"] == [dn_de("alpha")]
+    assert rapport.interrompu is False
+    totaux = [progression.total for progression in _progressions(evenements)]
+    # Le total ne croît qu'à la confirmation ; une adhésion replanifiée à tort le ferait
+    # monter une seconde fois, après elle.
+    budget = max(totaux)
+    assert totaux[totaux.index(budget) :] == sorted(totaux[totaux.index(budget) :], reverse=True)
+
+
+def test_l_arret_est_honore_pendant_la_relecture_qui_suit_une_reconnexion() -> None:
+    """La relecture de reprise est aussi longue que la première — un USER GROUP SHOW par
+    groupe cité. Un bouton *Arrêter* qui ne répondrait que sur l'un des deux chemins
+    serait un bouton qui ment."""
+    boitier = BoitierMemoire(groupes=["g1", "g2", "g3"])
+    interrupteur = _Interrupteur()
+
+    def couper_puis_cliquer_pendant_la_relecture(operation: str, cible: str) -> None:
+        if operation == "creer_utilisateur" and boitier.connexions == 1:
+            raise ErreurReseau("liaison perdue")
+        if operation == "lister_membres" and cible == "g1" and boitier.connexions == 2:
+            interrupteur.demander()
+
+    boitier.declencheur = couper_puis_cliquer_pendant_la_relecture
+    rapport, _ = _lancer(
+        boitier, [_utilisateur("alpha", "g1", "g2", "g3")], arret=interrupteur
+    )
+    lectures = [
+        cible for operation, cible in boitier.journal_appels if operation == "lister_membres"
+    ]
+    # Les trois du premier tour, puis la seule du second : g2 et g3 ne sont pas entamés.
+    assert lectures == ["g1", "g2", "g3", "g1"]
+    assert rapport.motif_arret is MotifArret.OPERATEUR
+
+
 def test_rejouer_le_meme_fichier_n_emet_aucune_ecriture() -> None:
     """Zéro commande d'écriture, pas « des commandes sans effet »."""
     boitier = BoitierMemoire()

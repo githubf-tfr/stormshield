@@ -34,16 +34,16 @@ from stormshield_utilisateurs.rapprochement import IndexBoitier, cle
 # cités par le fichier et reconnus sur le boîtier — connu seulement après la quatrième.
 LECTURES_DE_BASE = 4
 
-
-def _rien() -> None:
-    """Défaut neutre : la lecture d'inventaire se teste sans compteur ni barre."""
-
 # Tours de reconnexion consécutifs sans écriture aboutie que le lot tolère avant de
 # s'arrêter. Un seul, parce qu'une coupure sur la première commande d'écriture laisse
 # par construction un plan intact : « aucun progrès » y est l'état normal, pas une
 # pathologie. Au deuxième, plus rien ne distingue cette situation d'une écriture qui
 # retombe indéfiniment, et la boucle doit se fermer.
 TOURS_SANS_PROGRES_TOLERES = 1
+
+
+def _rien() -> None:
+    """Défaut neutre : la lecture d'inventaire se teste sans compteur ni barre."""
 
 
 class AnnuaireAbsent(Exception):
@@ -260,15 +260,27 @@ def lire_adhesions(
 
 
 def relire_inventaire(
-    boitier: Boitier, cites: Sequence[str], emettre: Emetteur
+    boitier: Boitier,
+    cites: Sequence[str],
+    emettre: Emetteur,
+    *,
+    arret_demande: ArretDemande = jamais_arrete,
 ) -> tuple[IndexBoitier, IndexBoitier, dict[str, tuple[str, ...]]]:
     """Reprise après reconnexion : comptes, groupes et **tout** l'inventaire des
     adhésions. Ni l'annuaire (lèverait `AnnuaireAbsent` sur un lot déjà entamé), ni la
-    politique (ne change pas pendant un lot)."""
+    politique (ne change pas pendant un lot).
+
+    La demande d'arrêt traverse jusqu'à `lire_adhesions` : cette relecture est aussi
+    longue que la première — un `USER GROUP SHOW` par groupe cité —, et un bouton
+    *Arrêter* qui ne répondrait que sur l'un des deux chemins serait un bouton qui ment.
+    """
     comptes = IndexBoitier.depuis(boitier.lister_utilisateurs())
     groupes = IndexBoitier.depuis(boitier.lister_groupes())
     membres = lire_adhesions(
-        boitier, construction_plan.groupes_a_interroger(cites, groupes), emettre=emettre
+        boitier,
+        construction_plan.groupes_a_interroger(cites, groupes),
+        emettre=emettre,
+        arret_demande=arret_demande,
     )
     return comptes, groupes, membres
 
@@ -475,7 +487,8 @@ def _appliquer(
             # On ne rejoue jamais la commande interrompue : on relit et on replanifie.
             try:
                 reste = _replanifier(
-                    boitier, utilisateurs, etat, rejets, cites, refuses, emettre
+                    boitier, utilisateurs, etat, rejets, cites, refuses, emettre,
+                    arret_demande,
                 )
             except ErreurFatale:
                 # Classe fille d'ErreurBoitier : à intercepter avant elle, sinon
@@ -611,6 +624,7 @@ def _replanifier(
     cites: Sequence[str],
     refuses: _Refuses,
     emettre: Emetteur,
+    arret_demande: ArretDemande,
 ) -> Plan:
     """Reprise en milieu de lot : comptes, groupes et **tout** l'inventaire des adhésions.
 
@@ -618,7 +632,9 @@ def _replanifier(
     l'autre ne change pendant un lot, et les relire ferait lever `AnnuaireAbsent` sur un
     chemin que rien ne décrit.
     """
-    comptes, groupes, membres = relire_inventaire(boitier, cites, emettre)
+    comptes, groupes, membres = relire_inventaire(
+        boitier, cites, emettre, arret_demande=arret_demande
+    )
     plan_reconstruit = construction_plan.construire(
         utilisateurs,
         replace(etat, comptes=comptes, groupes=groupes, membres_par_groupe=membres),
