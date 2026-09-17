@@ -24,6 +24,8 @@ from stormshield_utilisateurs.boitier_sdk import (
     commande_ajouter_membre,
     commande_creer_groupe,
     commande_creer_utilisateur,
+    commande_lister_membres,
+    lire_membres,
     lire_plancher,
 )
 
@@ -104,6 +106,59 @@ def test_appartenance_cite_le_groupe_comme_la_creation() -> None:
     assert commande_ajouter_membre("compta bis", "dupont") == (
         'USER GROUP ADDUSER "compta bis" dupont'
     )
+
+
+def test_la_commande_de_lecture_des_membres_cite_le_groupe() -> None:
+    """Même citation qu'à la création et qu'au rattachement : un groupe créé sous
+    « compta bis » resterait sinon inadressable."""
+    assert commande_lister_membres("compta bis") == 'USER GROUP SHOW group="compta bis"'
+
+
+def test_les_membres_se_lisent_dans_les_champs_repetes() -> None:
+    """La documentation donne une section [Group] et des champs member=, member_2=, …"""
+    jetons = {
+        "name": "compta",
+        "member": "uid=dupont,ou=users,dc=interne,dc=local",
+        "member_2": "uid=legrand,ou=users,dc=interne,dc=local",
+    }
+    assert lire_membres(jetons) == [
+        "uid=dupont,ou=users,dc=interne,dc=local",
+        "uid=legrand,ou=users,dc=interne,dc=local",
+    ]
+
+
+def test_les_membres_sont_rendus_dans_l_ordre_des_indices() -> None:
+    """member_10 vient après member_2, et non entre member_1 et member_3."""
+    jetons = {"member": "uid=a,dc=l", "member_10": "uid=j,dc=l", "member_2": "uid=b,dc=l"}
+    assert lire_membres(jetons) == ["uid=a,dc=l", "uid=b,dc=l", "uid=j,dc=l"]
+
+
+def test_un_groupe_sans_membre_rend_une_liste_vide() -> None:
+    """Section vide ou refus : les deux se traitent comme « aucun membre connu »."""
+    assert lire_membres({"name": "compta"}) == []
+
+
+def test_les_champs_membres_se_lisent_quelle_que_soit_leur_casse() -> None:
+    """Rien ne garantit que serverd étiquette dans la casse de la documentation."""
+    assert lire_membres({"Member": "uid=dupont,dc=l"}) == ["uid=dupont,dc=l"]
+
+
+def test_un_champ_qui_ressemble_a_member_sans_l_etre_est_ignore() -> None:
+    assert lire_membres({"membership": "uid=dupont,dc=l", "member_x": "uid=x,dc=l"}) == []
+
+
+def test_l_adaptateur_lit_les_membres_d_un_groupe() -> None:
+    """`_ClientFactice` n'expose pas les commandes reçues : la citation exacte de la
+    commande est déjà prouvée par `test_la_commande_de_lecture_des_membres_cite_le_groupe`,
+    hors adaptateur. Ici, seul le trajet réponse -> membres est vérifié."""
+    client = _ClientFactice(
+        reponse=_reponse_section(
+            "Group", ["name=compta", "member=uid=dupont,ou=users,dc=interne,dc=local"]
+        )
+    )
+    assert _adaptateur(client).lister_membres("compta") == [
+        "uid=dupont,ou=users,dc=interne,dc=local"
+    ]
 
 
 def test_lecture_du_plancher_de_politique() -> None:
