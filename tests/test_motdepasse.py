@@ -65,6 +65,40 @@ def test_le_melange_casse_l_ordre_des_classes_imposees() -> None:
     assert len(signatures) > 1
 
 
+def test_chaque_position_peut_porter_chaque_classe() -> None:
+    """Le mélange doit atteindre **toutes** les positions, la dernière comprise.
+
+    Le test précédent n'inspectait que les quatre premiers caractères : borner la boucle
+    de mélange à l'avant-dernier indice le laissait vert, alors que le dernier caractère
+    n'était plus jamais déplacé — mesuré, il était un spécial 2000 fois sur 2000. Une
+    permutation qui ne laisserait aucun caractère à sa place initiale passait tout
+    autant : on exige donc que chaque position voie chacune des quatre classes.
+
+    Quatre caractères, quatre classes : aucun remplissage, le mot de passe n'est que le
+    mélange des classes imposées. Deux cents tirages, et 3/4 puissance 200 vaut 10⁻²⁵ —
+    le test constate une couverture, il ne joue pas au hasard.
+    """
+    politique = PolitiqueMotDePasse(
+        longueur=4, minuscules=True, majuscules=True, chiffres=True, speciaux=True
+    )
+    vues: list[set[str]] = [set(), set(), set(), set()]
+    for _ in range(200):
+        genere = generer(politique)
+        for position, caractere in enumerate(genere):
+            vues[position].add(_classe(caractere))
+    for position, classes in enumerate(vues):
+        assert classes == {"minuscule", "majuscule", "chiffre", "special"}, position
+
+
+def test_une_longueur_egale_au_nombre_de_classes_est_acceptee() -> None:
+    """La borne exacte du refus : quatre caractères pour quatre classes tient, il n'y a
+    simplement aucun caractère de remplissage."""
+    politique = PolitiqueMotDePasse(
+        longueur=4, minuscules=True, majuscules=True, chiffres=True, speciaux=True
+    )
+    assert len(generer(politique)) == 4
+
+
 def test_deux_appels_donnent_deux_mots_de_passe() -> None:
     assert generer(TOUTES_CLASSES) != generer(TOUTES_CLASSES)
 
@@ -78,11 +112,15 @@ def test_generation_refusee_si_aucune_classe() -> None:
 
 
 def test_generation_refusee_si_longueur_inferieure_au_nombre_de_classes() -> None:
-    politique = PolitiqueMotDePasse(
-        longueur=2, minuscules=True, majuscules=True, chiffres=True, speciaux=True
-    )
-    with pytest.raises(ValueError):
-        generer(politique)
+    """Deux longueurs, dont celle qui borde le refus : à trois caractères pour quatre
+    classes, relâcher la garde d'un cran rendrait un mot de passe de quatre caractères
+    là où l'appelant en a demandé trois — plus long que demandé, donc silencieux."""
+    for longueur in (2, 3):
+        politique = PolitiqueMotDePasse(
+            longueur=longueur, minuscules=True, majuscules=True, chiffres=True, speciaux=True
+        )
+        with pytest.raises(ValueError):
+            generer(politique)
 
 
 def test_politique_sous_le_plancher_refusee() -> None:
@@ -109,3 +147,16 @@ def test_proposition_respecte_le_plancher_et_reste_genereuse() -> None:
     assert propose.longueur == 24
     assert violations(propose, plancher) == []
     assert proposer(PlancherPolitique(8, 2, 0)).longueur == 16
+
+
+def test_la_proposition_active_les_quatre_classes() -> None:
+    """C'est la politique de repli, celle qui part en lot réel quand l'opérateur ne
+    touche à rien : en éteindre une seule réduisait l'alphabet sans que rien ne tombe."""
+    propose = proposer(PlancherPolitique(longueur_min=8, nombre_classes_min=1, entropie_min=0))
+    assert (
+        propose.minuscules,
+        propose.majuscules,
+        propose.chiffres,
+        propose.speciaux,
+    ) == (True, True, True, True)
+    assert propose.nombre_classes() == 4
