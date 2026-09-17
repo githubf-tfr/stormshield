@@ -74,9 +74,13 @@ def _adhesions_existantes(etat: EtatBoitier) -> tuple[dict[str, frozenset[str]],
         for dn in membres:
             uid = uid_du_dn(dn)
             if uid is None or cle(uid) not in etat.comptes.cles:
+                # Aucun compte du boîtier derrière ce membre : « aucune action », dit la
+                # spec — et retenir son uid en serait une, la plus coûteuse : elle
+                # supprimerait du plan l'adhésion d'un compte homonyme à créer. Compté,
+                # rien de plus.
                 non_rattaches += 1
-            if uid is not None:
-                deja.add(cle(uid))
+                continue
+            deja.add(cle(uid))
         par_groupe[cle_groupe] = frozenset(deja)
     return par_groupe, non_rattaches
 

@@ -245,6 +245,20 @@ def test_un_dn_designant_un_compte_inconnu_du_boitier_est_compte() -> None:
     assert plan.nombre_membres_non_rattaches == 1
 
 
+def test_un_membre_non_rattache_ne_supprime_aucune_adhesion_planifiee() -> None:
+    """Spec : un membre que l'outil ne sait relier à aucun compte **du boîtier** ne
+    déclenche « aucune action ». Retirer du plan l'adhésion du compte homonyme que le
+    fichier demande de créer en serait une, et la plus coûteuse : ce compte naîtrait sans
+    le groupe que le CSV lui donne, sur la foi d'un DN qu'on n'a pas su lire."""
+    plan = construire(
+        [utilisateur("dupont", "compta")],
+        _etat(groupes=("compta",), membres={"compta": (_dn("dupont"),)}),
+    )
+    assert plan.nombre_membres_non_rattaches == 1
+    assert plan.travaux[0].a_creer is True
+    assert plan.travaux[0].adhesions == ("compta",)
+
+
 def test_aucun_membre_non_rattache_sur_un_boitier_sain() -> None:
     """Zéro, quel que soit le contenu du fichier : `legrand` n'y figure pas, mais le
     boîtier le connaît."""
