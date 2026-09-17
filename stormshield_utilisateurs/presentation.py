@@ -104,6 +104,18 @@ class DemandeArret:
         return self._demande.is_set()
 
 
+ARRET_DEMANDE_AU_CLIC = (
+    "Arrêt demandé : le compte en cours va d'abord à son terme, puis le lot s'arrête."
+)
+"""Écrite au journal dès le clic, et non à l'arrêt effectif.
+
+Entre les deux il peut s'écouler une quinzaine de secondes — trois essais de mot de
+passe à deux secondes, une reconnexion — pendant lesquelles des comptes continuent de
+défiler. Sans cette ligne, rien ne distingue une demande prise en compte d'un clic
+perdu, et l'opérateur qui doute reclique ou ferme la fenêtre.
+"""
+
+
 @dataclass(frozen=True)
 class EtatDesBoutons:
     """Ce que *Lancer* et *Arrêter* affichent, calculé hors de tout widget."""

@@ -53,6 +53,7 @@ from stormshield_utilisateurs.modele import (
     Utilisateur,
 )
 from stormshield_utilisateurs.presentation import (
+    ARRET_DEMANDE_AU_CLIC,
     FERMETURE_PENDANT_CREATION,
     POLITIQUE_INITIALE,
     AnnuaireCree,
@@ -434,7 +435,12 @@ class Fenetre:
         clic pose une demande déjà posée, ce qui ne change rien. Le fil d'exécution
         répond quand le compte en cours est allé à son terme, et c'est le journal du
         métier qui le dit.
+
+        La ligne de journal part d'ici et non du fil : elle accuse réception du geste,
+        pendant que le fil continue son compte. Un second clic la réécrit, ce qui est
+        encore une réponse.
         """
+        self._ecrire(ARRET_DEMANDE_AU_CLIC)
         self.arret.demander()
 
     def _appliquer_etat_des_boutons(self) -> None:

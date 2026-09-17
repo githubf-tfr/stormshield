@@ -41,6 +41,7 @@ from stormshield_utilisateurs.modele import (
     Rejet,
 )
 from stormshield_utilisateurs.presentation import (
+    ARRET_DEMANDE_AU_CLIC,
     AnnuaireCree,
     AnnuaireManquant,
     BoiteParLot,
@@ -990,6 +991,17 @@ def test_pendant_un_lot_seul_arreter_est_actif() -> None:
     repos, et *Lancer* ferait partir un second lot sur le même boîtier."""
     etat = etat_des_boutons(lot_en_cours=True)
     assert (etat.lancer, etat.arreter) == (False, True)
+
+
+def test_le_clic_sur_arreter_a_sa_ligne_de_journal() -> None:
+    """Entre le clic et l'arrêt effectif, des comptes continuent d'apparaître pendant une
+    quinzaine de secondes plausibles — réessais de mot de passe, reconnexion. Sans signe
+    que sa demande existe, l'opérateur reclique ou ferme la fenêtre : justement ce que le
+    bouton remplace. La ligne dit donc que la demande est prise, et que le compte en cours
+    va d'abord à son terme."""
+    assert ARRET_DEMANDE_AU_CLIC.startswith("Arrêt demandé")
+    assert "compte en cours" in ARRET_DEMANDE_AU_CLIC
+    assert "terme" in ARRET_DEMANDE_AU_CLIC
 
 
 def test_une_demande_d_arret_neuve_ne_demande_rien() -> None:
