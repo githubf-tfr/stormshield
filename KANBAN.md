@@ -32,14 +32,8 @@ Tenu à la main.
 
 ## À faire
 
-- **Trancher l'annulation d'un lot en cours.** Deux cents comptes font plusieurs minutes
-  d'écritures ; l'opérateur qui s'aperçoit qu'il a visé le mauvais boîtier n'a aucune
-  sortie. La seule issue est de fermer la fenêtre, ce qui tue le fil où qu'il en soit — y
-  compris entre la création d'un compte et la pose de son mot de passe, laissant un compte
-  inutilisable qu'aucun relancement ne répare. Non implémenté délibérément : la spec
-  validée n'en parle pas.
 - **Exécuter `docs/recette/2026-09-16-cahier-recette-v1.md` dès qu'un boîtier est
-  joignable.** 112 cas, dont 21 jouables sans boîtier sur un poste Windows et le `.exe` de
+  joignable.** 121 cas, dont 22 jouables sans boîtier sur un poste Windows et le `.exe` de
   la release. C'est la seule couverture de `fenetre.py` et le seul moyen de confirmer les
   hypothèses de `boitier_sdk.py` (section F du cahier).
 - Poser le tag `v1.0.0` pour déclencher la première construction du `.exe`. Le workflow
@@ -70,6 +64,26 @@ Tous sont portés par le cahier de recette, avec le cas qui les tranche.
 _(rien)_
 
 ## Terminé
+
+### Arrêt d'un lot en cours (2026-09-17)
+
+`feat/arret-du-lot`. Un bouton *Arrêter* à côté de *Lancer* remplace la seule sortie qui
+existait — fermer la fenêtre, qui tue le fil n'importe où, y compris entre `USER CREATE`
+et `USER PASSWORD`.
+
+- L'arrêt est consulté **entre deux comptes et entre deux groupes**, jamais au milieu de
+  l'un d'eux : le compte entamé va jusqu'à son terme, rattachements compris. C'est ce qui
+  distingue ce bouton de la fermeture qu'il remplace.
+- `MotifArret.OPERATEUR` est une troisième fin, avec son bilan propre : comptes créés,
+  comptes non touchés, et que relancer est sans danger. `Rapport.comptes_prevus` fige ce
+  que le plan prévoyait, sans quoi le second chiffre n'existerait pas.
+- Un `threading.Event` (`presentation.DemandeArret`) porte l'ordre du fil de l'interface
+  au fil d'exécution : seul objet partagé entre les deux, et le seul message à circuler
+  dans ce sens. Le garde de structure de `test_presentation` refuse toujours la version
+  qui prendrait cet objet sur `self`.
+- Le bouton agit aussi en simulation, dont le seul point d'arrêt est la fin de la lecture.
+- **296 tests**, `ruff` et `mypy` verts, aucun `# type: ignore`. Spécification amendée,
+  cahier de recette porté à 121 cas (section Q).
 
 ### Injection d'utilisateurs v1 (2026-09-16)
 

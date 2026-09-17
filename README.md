@@ -94,6 +94,18 @@ nombre de comptes à créer et les groupes neufs — en signalant ceux qui n'aur
 membre, signature d'une coquille de saisie dans la colonne des groupes. Rien n'est encore
 écrit à ce moment : l'opérateur peut renoncer.
 
+## Arrêter un lot en cours
+
+Le bouton **« Arrêter »**, à côté de *Lancer*, s'active pendant un lot — en réel comme en
+simulation. Il ne demande aucune confirmation.
+
+Le compte en cours de création va **jusqu'à son terme** — création, mot de passe,
+rattachements — et le suivant n'est pas entamé : c'est la différence avec la fermeture de la
+fenêtre, qui couperait le travail n'importe où et pourrait laisser un compte sans mot de
+passe utilisable. Le bilan annonce alors combien de comptes ont été créés et combien n'ont
+pas été touchés. Relancer le même CSV est sans danger : les comptes créés seront classés
+« déjà présent, ignoré ».
+
 ## Mots de passe
 
 Les mots de passe sont générés **au moment de la création effective de chaque compte**,
