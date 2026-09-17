@@ -147,10 +147,22 @@ def test_un_champ_qui_ressemble_a_member_sans_l_etre_est_ignore() -> None:
     assert lire_membres({"membership": "uid=dupont,dc=l", "member_x": "uid=x,dc=l"}) == []
 
 
+def test_une_valeur_absente_n_est_pas_lue_comme_le_dn_litteral_none() -> None:
+    """`<key name="member"/>` sans attribut `value` fait produire `member=None` par le SDK :
+    `str(None)` vaut le texte « None », non vide, qui serait sinon retenu comme membre."""
+    assert lire_membres({"name": "compta", "member": None}) == []
+
+
+def test_un_champ_termine_par_un_saut_de_ligne_n_est_pas_un_membre() -> None:
+    """`$` accepte un saut de ligne final, ce que `\\Z` refuse : sans lui, `member\\n`
+    correspondrait au motif alors qu'il n'est pas le champ `member`."""
+    assert lire_membres({"member\n": "uid=dupont,dc=l"}) == []
+
+
 def test_l_adaptateur_lit_les_membres_d_un_groupe() -> None:
-    """`_ClientFactice` n'expose pas les commandes reçues : la citation exacte de la
-    commande est déjà prouvée par `test_la_commande_de_lecture_des_membres_cite_le_groupe`,
-    hors adaptateur. Ici, seul le trajet réponse -> membres est vérifié."""
+    """Preuve du câblage complet : la méthode doit envoyer la commande produite par
+    `commande_lister_membres`, guillemets compris, et pas une commande voisine
+    (`USER GROUP LIST` par exemple) qui laisserait la suite verte sans rien prouver."""
     client = _ClientFactice(
         reponse=_reponse_section(
             "Group", ["name=compta", "member=uid=dupont,ou=users,dc=interne,dc=local"]
@@ -159,6 +171,7 @@ def test_l_adaptateur_lit_les_membres_d_un_groupe() -> None:
     assert _adaptateur(client).lister_membres("compta") == [
         "uid=dupont,ou=users,dc=interne,dc=local"
     ]
+    assert client.commandes == ['USER GROUP SHOW group="compta"']
 
 
 def test_lecture_du_plancher_de_politique() -> None:
@@ -317,9 +330,10 @@ class _ClientFactice:
         self.panne_a_l_envoi = panne_a_l_envoi
         self.reponse = reponse
         self.deconnexions = 0
+        self.commandes: list[str] = []
 
     def send_command(self, commande: str) -> Any:
-        del commande
+        self.commandes.append(commande)
         if self.panne_a_l_envoi is not None:
             raise self.panne_a_l_envoi
         if self.reponse is not None:
