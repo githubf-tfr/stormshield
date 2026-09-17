@@ -638,6 +638,34 @@ def test_une_adhesion_refusee_ne_se_rejoue_pas_sous_une_autre_graphie() -> None:
     assert _rattachements(boitier) == ["compta/jean.dupont"]
 
 
+def test_une_adhesion_refusee_ne_se_rejoue_pas_quand_le_groupe_a_une_casse_mixte() -> None:
+    """Les deux tests de ce registre partent d'un boîtier tout en minuscules : le refus
+    y est donc enregistré sous une graphie déjà normalisée, et un registre qui rangerait
+    la graphie brute au lieu de la clé de rapprochement passerait inaperçu. Ici la toute
+    première lecture rend déjà une casse mixte — `Jean.Dupont` dans `Compta` — pour
+    pincer le côté écriture. La casse du *groupe* suffit à casser la symétrie, même si
+    les deux lectures rendent ensuite la même graphie du compte."""
+    boitier = BoitierMemoire(
+        utilisateurs=["Jean.Dupont"], groupes=["Compta"], membres={"Compta": []}
+    )
+    coupures: list[str] = []
+
+    def refuser_compta_puis_couper(operation: str, cible: str) -> None:
+        if operation == "ajouter_membre" and cible.startswith("Compta/"):
+            raise ErreurCommande(200, "groupe compta inconnu")
+        if operation == "creer_utilisateur" and cible == "legrand" and not coupures:
+            coupures.append(cible)
+            raise ErreurReseau("liaison perdue")
+
+    boitier.declencheur = refuser_compta_puis_couper
+    rapport, _ = _lancer(
+        boitier, [_utilisateur("jean.dupont", "compta"), _utilisateur("legrand", ligne=3)]
+    )
+    refus = [echec for echec in rapport.echecs if echec.operation == "USER GROUP ADDUSER"]
+    assert len(refus) == 1
+    assert _rattachements(boitier) == ["Compta/Jean.Dupont"]
+
+
 def test_un_groupe_refuse_n_est_pas_rejoue_apres_une_reconnexion() -> None:
     """Même règle pour USER GROUP CREATE : un refus est signalé une fois."""
     boitier = BoitierMemoire()
