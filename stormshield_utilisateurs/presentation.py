@@ -108,7 +108,8 @@ class DemandeArret:
 
 
 ARRET_DEMANDE_AU_CLIC = (
-    "Arrêt demandé : le compte en cours va d'abord à son terme, puis le lot s'arrête."
+    "Arrêt demandé : le lot s'arrête dès que l'opération en cours est allée à son "
+    "terme — une lecture pendant l'inventaire, un compte entamé pendant l'écriture."
 )
 """Écrite au journal dès le clic, et non à l'arrêt effectif.
 
@@ -116,6 +117,11 @@ Entre les deux il peut s'écouler une quinzaine de secondes — trois essais de 
 passe à deux secondes, une reconnexion — pendant lesquelles des comptes continuent de
 défiler. Sans cette ligne, rien ne distingue une demande prise en compte d'un clic
 perdu, et l'opérateur qui doute reclique ou ferme la fenêtre.
+
+Elle part du clic, donc sans connaître la phase : elle ne peut promettre aucun compte
+en cours. Un arrêt tombé pendant la lecture d'inventaire — la phase la plus longue —
+n'en a entamé aucun, et le bilan dira qu'aucun plan n'a été construit. Le journal se
+contredirait.
 """
 
 
@@ -549,13 +555,26 @@ def avertissement_perte_de_secrets(nombre: int) -> str:
 
     Aucun relancement ne les reconstitue : les comptes existent déjà sur le boîtier, le
     plan suivant les verra comme déjà présents et ils resteront sans mot de passe connu.
+
+    La phrase entière s'accorde, et pas seulement son premier membre : un avertissement
+    mal accordé est un avertissement qu'on croit moins, et celui-ci porte des secrets
+    qu'aucun relancement ne recrée.
     """
+    if nombre <= 1:
+        corps = (
+            "Lancer un nouveau lot l'efface définitivement. Le compte, lui, reste créé "
+            "sur le firewall : aucun relancement ne lui redonnera de mot de passe, il "
+            "sera vu comme déjà présent et ne recevra plus que ses adhésions manquantes."
+        )
+    else:
+        corps = (
+            "Lancer un nouveau lot les efface définitivement. Les comptes, eux, restent "
+            "créés sur le firewall : aucun relancement ne leur redonnera de mot de "
+            "passe, ils seront vus comme déjà présents et ne recevront plus que leurs "
+            "adhésions manquantes."
+        )
     return (
-        f"{_secrets_en_souffrance(nombre)} dans un fichier.\n\n"
-        "Lancer un nouveau lot les efface définitivement. Les comptes, eux, restent "
-        "créés sur le firewall : aucun relancement ne leur redonnera de mot de passe, "
-        "ils seront vus comme déjà présents et ne recevront plus que leurs adhésions "
-        "manquantes.\n\n"
+        f"{_secrets_en_souffrance(nombre)} dans un fichier.\n\n{corps}\n\n"
         "Lancer quand même ?"
     )
 

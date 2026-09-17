@@ -522,7 +522,17 @@ def test_l_avertissement_de_perte_dit_le_nombre_et_l_irreversible() -> None:
 
 
 def test_l_avertissement_de_perte_s_accorde_au_singulier() -> None:
-    assert "1 mot de passe n'a pas" in avertissement_perte_de_secrets(1)
+    """Le test ne gardait que ses six premiers mots, et la suite de la phrase restait au
+    pluriel sur un sujet unique. Un avertissement mal accordé est un avertissement qu'on
+    croit moins, et celui-ci porte des secrets qu'aucun relancement ne recrée."""
+    texte = avertissement_perte_de_secrets(1)
+    assert texte == (
+        "1 mot de passe n'a pas été enregistré dans un fichier.\n\n"
+        "Lancer un nouveau lot l'efface définitivement. Le compte, lui, reste créé sur "
+        "le firewall : aucun relancement ne lui redonnera de mot de passe, il sera vu "
+        "comme déjà présent et ne recevra plus que ses adhésions manquantes.\n\n"
+        "Lancer quand même ?"
+    )
 
 
 def test_l_avertissement_de_perte_ne_parle_plus_de_compte_ignore() -> None:
@@ -736,6 +746,25 @@ def test_le_plan_dit_par_compte_ce_qui_lui_arrive() -> None:
     ]
 
 
+def test_un_compte_a_creer_sans_groupe_n_annonce_aucun_rattachement() -> None:
+    """La branche la plus fréquente d'un premier lot : le CSV sans colonne de groupes.
+    Le test qui l'affirmait a été remplacé par un plan vide, qui ne rend rien du tout —
+    saboter ce rendu-là ne faisait plus tomber personne."""
+    plan = replace(
+        _plan_vide(), travaux=(TravailCompte(utilisateur("dupont"), "dupont", True, ()),)
+    )
+    assert lignes_du_plan(plan) == ["dupont : à créer"]
+
+
+def test_l_accord_de_membre_suit_le_nombre_dans_le_journal() -> None:
+    """Le pluriel n'était plus gardé que par la boîte de confirmation, qui rend ce texte
+    par son propre chemin : ce que l'opérateur lit dans le journal n'avait plus rien."""
+    plan = replace(
+        _plan_vide(), groupes_a_creer=(GroupeACreer("rh", 3), GroupeACreer("compta", 1))
+    )
+    assert lignes_du_plan(plan) == ["Groupes à créer : rh (3 membres), compta (1 membre)"]
+
+
 def test_un_seul_orphelin_s_annonce_au_singulier() -> None:
     assert lignes_du_plan(replace(_plan_vide(), nombre_orphelins=1)) == [
         "1 compte du boîtier ne figure pas dans le fichier : il ne sera pas touché."
@@ -753,6 +782,16 @@ def test_les_membres_non_rattaches_ont_leur_ligne_quand_ils_existent() -> None:
     assert lignes_du_plan(plan) == [
         "7 membres de groupes n'ont pas pu être reconnus : les adhésions "
         "correspondantes seront renvoyées à chaque exécution."
+    ]
+
+
+def test_un_seul_membre_non_rattache_s_annonce_au_singulier() -> None:
+    """Un « 1 membres de groupes » coûterait au canari le crédit dont il vit : c'est la
+    seule ligne qui révèle que la forme des DN rendus par le boîtier n'est pas celle
+    attendue, et elle doit se lire comme une phrase écrite pour être crue."""
+    assert lignes_du_plan(replace(_plan_vide(), nombre_membres_non_rattaches=1)) == [
+        "1 membre de groupe n'a pas pu être reconnu : l'adhésion correspondante sera "
+        "renvoyée à chaque exécution."
     ]
 
 
@@ -786,6 +825,33 @@ def test_une_collision_de_casse_entre_comptes_est_dite_en_clair() -> None:
         "compte jean.dupont : le boîtier en porte 2 graphies (Jean.Dupont, "
         "JEAN.DUPONT) — rien ne lui sera fait, le doublon se lève à la main sur le "
         "boîtier."
+    ]
+
+
+def test_l_ordre_des_categories_du_plan_est_fixe() -> None:
+    """Chacun des tests ci-dessus n'éprouve qu'une seule catégorie non vide : aucun ne
+    dit dans quel ordre l'opérateur les lit, et permuter deux catégories les laissait
+    tous verts. L'ordre porte pourtant un sens — ce sur quoi il faut se prononcer
+    d'abord (groupes neufs, comptes, ambiguïtés), les compteurs de contexte ensuite."""
+    plan = Plan(
+        travaux=(TravailCompte(utilisateur("dupont"), "dupont", True, ()),),
+        groupes_a_creer=(GroupeACreer("rh", 2),),
+        nombre_orphelins=3,
+        nombre_membres_non_rattaches=7,
+        groupes_ambigus=(GroupeAmbigu("compta", ("Compta", "COMPTA")),),
+        comptes_ambigus=(CompteAmbigu("legrand", ("Legrand", "LEGRAND")),),
+        domaine="interne.local",
+    )
+    assert lignes_du_plan(plan) == [
+        "Groupes à créer : rh (2 membres)",
+        "dupont : à créer",
+        "groupe compta : le boîtier en porte 2 graphies (Compta, COMPTA) — aucun "
+        "compte n'y sera rattaché, le doublon se lève à la main sur le boîtier.",
+        "compte legrand : le boîtier en porte 2 graphies (Legrand, LEGRAND) — rien ne "
+        "lui sera fait, le doublon se lève à la main sur le boîtier.",
+        "3 comptes du boîtier ne figurent pas dans le fichier : ils ne seront pas touchés.",
+        "7 membres de groupes n'ont pas pu être reconnus : les adhésions "
+        "correspondantes seront renvoyées à chaque exécution.",
     ]
 
 
@@ -1137,11 +1203,17 @@ def test_le_clic_sur_arreter_a_sa_ligne_de_journal() -> None:
     """Entre le clic et l'arrêt effectif, des comptes continuent d'apparaître pendant une
     quinzaine de secondes plausibles — réessais de mot de passe, reconnexion. Sans signe
     que sa demande existe, l'opérateur reclique ou ferme la fenêtre : justement ce que le
-    bouton remplace. La ligne dit donc que la demande est prise, et que le compte en cours
-    va d'abord à son terme."""
+    bouton remplace. La ligne dit donc que la demande est prise, et que ce qui est entamé
+    va d'abord à son terme.
+
+    Elle est écrite au clic, sans connaître la phase : promettre « le compte en cours »
+    est faux pendant la lecture de l'inventaire, la plus longue, où aucun compte n'est
+    entamé — et le journal se contredirait avec le bilan, qui dit alors qu'aucun plan
+    n'a été construit."""
     assert ARRET_DEMANDE_AU_CLIC.startswith("Arrêt demandé")
-    assert "compte en cours" in ARRET_DEMANDE_AU_CLIC
+    assert "opération en cours" in ARRET_DEMANDE_AU_CLIC
     assert "terme" in ARRET_DEMANDE_AU_CLIC
+    assert "le compte en cours" not in ARRET_DEMANDE_AU_CLIC
 
 
 def test_une_demande_d_arret_neuve_ne_demande_rien() -> None:
