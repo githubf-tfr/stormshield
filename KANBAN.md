@@ -46,14 +46,26 @@ Tenu à la main.
 
 ## Points à lever dès qu'un boîtier est joignable
 
-Tous sont portés par le cahier de recette, avec le cas qui les tranche.
+Tous sont portés par le cahier de recette, avec le cas qui les tranche — sauf la
+complétude de `USER LIST`, relevée après son écriture et qu'aucun cas ne couvre encore.
 
 - **La forme des membres rendus par `USER GROUP SHOW`** — seul point structurant de la
-  v2. Le nombre de membres non rattachés affiché au plan la confirme ou l'infirme dès la
-  première lecture : il vaut **zéro sur un boîtier sain**, les membres se comparant aux
-  comptes du boîtier et non au fichier (cahier de recette, cas 122, à jouer en premier).
+  v2. Le nombre de membres non rattachés affiché au plan **l'infirme** dès la première
+  lecture — il ne la confirme jamais seul, voir les pièges datés du 2026-09-17 : il vaut
+  **zéro sur un boîtier sain**, les membres se comparant aux comptes du boîtier et non au
+  fichier (cahier de recette, cas 122, à jouer en premier).
   Faux : l'outil réémet des `ADDUSER` redondants, sans dommage, et le repli tient dans
   `uid_du_dn`.
+- **La complétude de `USER LIST`** — troncature ou pagination au-delà d'un certain nombre
+  de comptes. Jamais évoquée nulle part jusqu'ici, alors que le `README.md` promet
+  « quelques milliers de lignes » et que la spec v2 raisonne sur un boîtier de 500
+  comptes. Si serverd tronque, les comptes au-delà de la coupure sont vus **absents**,
+  `USER CREATE` est refusé « existe déjà », et le refus écarte toutes leurs adhésions —
+  la troncature étant persistante, **à chaque exécution, définitivement**. Le compte
+  d'orphelins est faux du même coup, et une ambiguïté de casse dont une graphie tombe
+  hors de la réponse devient invisible. Rien ne le détecte : le seul indice est un nombre
+  anormal de refus « existe déjà » sur des comptes annoncés à créer. À trancher en
+  comparant le nombre de comptes rendus à celui qu'affiche l'administration web.
 - **La forme rendue par `USER GROUP LIST`** — nom de groupe ou DN. Elle sert désormais
   d'argument à `USER GROUP SHOW`.
 - **La coexistence de deux groupes — ou de deux comptes — que la casse seule distingue.**

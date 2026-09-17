@@ -607,6 +607,24 @@ Même traitement qu'un échec isolé : signalé, le lot continue — aucun conce
 le produit, et c'est mot pour mot la règle du point 3 pour les comptes : **une seule règle pour
 les deux rapprochements**. Le doublon ne peut être levé qu'à la main, sur le boîtier.
 
+**5. La complétude de `USER LIST` et de `USER GROUP LIST`.** Rien ne prouve que serverd rende la
+totalité des comptes en une réponse : ni troncature au-delà d'un nombre de lignes, ni pagination
+n'ont été vérifiées. Tout ce document raisonne pourtant sur « un boîtier de 500 comptes », et le
+`README.md` promet « quelques milliers de lignes ». *Si l'hypothèse est fausse*, le défaut est le
+plus coûteux de la v2, et le seul qui se répète : les comptes au-delà de la coupure sont vus
+**absents**, donc planifiés à créer ; `USER CREATE` est refusé « existe déjà » ; et un refus de
+création écarte toutes les adhésions de ce compte. La troncature étant persistante, ces adhésions
+sont écartées **à chaque exécution**, sans jamais partir. S'y ajoutent un compte d'orphelins
+faux — les comptes invisibles ne sont comptés nulle part — et une ambiguïté de casse que l'outil
+ne peut plus voir, l'une des deux graphies étant hors de la réponse.
+
+Rien dans le produit ne le détecte aujourd'hui : un compte vu absent puis refusé « existe déjà »
+est exactement ce qu'on observe sur un boîtier sain dont le fichier cite un compte créé entre
+deux lectures. Le seul indice est un **nombre anormal de refus « existe déjà » sur des comptes
+que le plan annonçait à créer**, et il faut le chercher. À trancher au premier boîtier joignable,
+en comparant le nombre de comptes rendus par `USER LIST` à celui que l'administration web
+affiche.
+
 Les points non vérifiés de la v1 restent ouverts et inchangés.
 
 ## Hors périmètre v2
