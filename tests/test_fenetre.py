@@ -775,10 +775,20 @@ def test_la_premiere_lecture_du_plancher_active_et_pre_remplit_la_politique() ->
 
 
 def test_une_relecture_ne_reecrit_pas_une_longueur_durcie_par_l_operateur() -> None:
+    """Le cas réel : l'opérateur tape une longueur durcie dans le champ, ne clique sur
+    rien, et une seconde lecture de politique arrive — un lot relancé, une reconnexion.
+    Elle ne doit pas lui rabaisser son champ à ce que le boîtier propose.
+
+    Rien n'est affecté à la main : la version d'origine posait elle-même
+    `fenetre.politique`, ce qui faisait survivre le mutant forçant le pré-remplissage à
+    chaque lecture — la politique courante portait déjà la valeur durcie.
+    """
     with _fenetre_ouverte() as (fenetre, _):
         fenetre._appliquer(PolitiqueLue(PlancherPolitique(16, 4, 0)))
-        fenetre.var_longueur.set(40)
-        fenetre.politique = fenetre._politique_des_champs()
+        spinbox = fenetre.champs_politique[0]
+        assert isinstance(spinbox, ttk.Spinbox)
+        spinbox.delete(0, tk.END)
+        spinbox.insert(0, "40")
         fenetre._appliquer(PolitiqueLue(PlancherPolitique(16, 4, 0)))
         assert fenetre.var_longueur.get() == 40
 
