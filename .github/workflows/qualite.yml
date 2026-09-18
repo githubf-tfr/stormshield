@@ -72,8 +72,14 @@ jobs:
           fi
 
           if [ "$code" -ne 0 ]; then
+            # Une annotation `::error::` s'arrête à la première fin de ligne réelle :
+            # tout saut à la ligne doit passer en `%0A` pour rester dans le même
+            # message, sans quoi seule sa première ligne apparaît — ce qui nous a
+            # trompés une fois déjà.
+            encoder() { awk 'BEGIN{ORS="%0A"} {print}' | sed 's/%0A$//'; }
+
             noms=$(printf '%s\n' "$resultat" | grep -E '^(FAILED|ERROR) ' | tr '\n' ' | ')
-            resume=$(printf '%s\n' "$resultat" | sed -n '/short test summary info/,$p' | head -20)
+            resume=$(printf '%s\n' "$resultat" | sed -n '/short test summary info/,$p' | head -20 | encoder)
             echo "::error::pytest a échoué (code ${code}) : ${noms:-voir le journal ci-dessus}"
             if [ -n "$resume" ]; then
               echo "::error::${resume}"
@@ -84,7 +90,7 @@ jobs:
             # attrapés dans `executer()` ne le fait jamais autrement), la section
             # « Captured stderr call » qui le montre. Sans ce bloc, un `_tourner` qui
             # expire en silence après vingt secondes ne nomme aucune cause.
-            detail=$(printf '%s\n' "$resultat" | awk '/^=+ FAILURES =+$/{f=1;next} /^=+ short test summary info =+$/{f=0} f' | head -60)
+            detail=$(printf '%s\n' "$resultat" | awk '/^=+ FAILURES =+$/{f=1;next} /^=+ short test summary info =+$/{f=0} f' | head -60 | encoder)
             if [ -n "$detail" ]; then
               echo "::error::${detail}"
             fi
