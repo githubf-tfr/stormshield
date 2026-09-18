@@ -1,10 +1,17 @@
 """Fenêtre unique tkinter. Ne décide rien : elle câble `presentation` sur des widgets.
 
-Seul module du paquet à importer `tkinter`, et le seul qu'aucun test n'importe :
-`tkinter` peut manquer sur la machine de test comme sur le runner d'intégration
-continue. Tout ce qui se vérifie vit dans `presentation` ; ce qui reste ici — la
-disposition, les boîtes de dialogue, l'activation des champs — relève du cahier de
-recette.
+Seul module du paquet à importer `tkinter`. `tests/test_fenetre.py` l'importe et
+construit la fenêtre pour de vrai : il lui faut `tkinter` (paquet `python3-tk` sous
+Debian) et un affichage — `xvfb-run -a pytest` en fournit un, et sans affichage ces
+tests se sautent au lieu de rougir. Ce qui reste hors de leur portée : les boîtes
+modales réelles, qui attendent un clic humain, et `lancer()`, qui entre dans
+`mainloop` et n'en sort qu'à la fermeture. Ce qui relève encore du cahier de recette :
+l'apparence, et tout ce qu'un humain seul peut juger.
+
+Les boîtes modales sont pour cela injectables — `Dialogues`, défaut au vrai
+comportement —, comme la fabrique de boîtier qui part dans le fil. Ces deux coutures
+ne changent rien à ce que voit l'opérateur : elles rendent le reste de ce fichier
+vérifiable sans qu'un humain clique.
 
 Quatre règles tiennent ce fichier :
 
@@ -32,11 +39,13 @@ import threading
 import tkinter as tk
 import traceback
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from types import TracebackType
 
 from stormshield_utilisateurs import lecture, sortie
+from stormshield_utilisateurs.boitier import Boitier
 from stormshield_utilisateurs.execution import (
     CreationReussie,
     Journal,
@@ -72,6 +81,7 @@ from stormshield_utilisateurs.presentation import (
     Publieur,
     avertissement_de_fermeture,
     avertissement_perte_de_secrets,
+    boitier_de_la_connexion,
     etat_des_boutons,
     libelle_plancher,
     ligne_d_enregistrement,
@@ -98,6 +108,80 @@ LIBELLE_CERTIFICAT = (
     "Vérifier le certificat du firewall (décoché : identifiants et mots de passe "
     "générés transitent dans une session interceptable)"
 )
+
+# Une boîte à trois arguments : son titre, son texte, et la fenêtre sous laquelle elle
+# s'ouvre — le dialogue de création d'annuaire n'est pas la fenêtre principale, et une
+# boîte posée sur la mauvaise passe derrière.
+AfficherBoite = Callable[[str, str, tk.Misc], None]
+# Vrai = l'opérateur a dit oui. Le défaut ci-dessous impose l'icône d'avertissement et
+# le bouton *Non* par défaut : les trois questions du produit sont graves, et aucune ne
+# doit se répondre « oui » par une frappe distraite.
+PoserQuestionGrave = Callable[[str, str, tk.Misc], bool]
+# Chaîne vide = l'opérateur a renoncé. Titre et filtres vivent dans le défaut : ils ne
+# varient pas d'un appel à l'autre.
+ChoisirFichier = Callable[[tk.Misc], str]
+
+
+def _erreur_reelle(titre: str, message: str, parent: tk.Misc) -> None:
+    messagebox.showerror(titre, message, parent=parent)
+
+
+def _information_reelle(titre: str, message: str, parent: tk.Misc) -> None:
+    messagebox.showinfo(titre, message, parent=parent)
+
+
+def _avertissement_reel(titre: str, message: str, parent: tk.Misc) -> None:
+    messagebox.showwarning(titre, message, parent=parent)
+
+
+def _question_grave_reelle(titre: str, message: str, parent: tk.Misc) -> bool:
+    return messagebox.askyesno(
+        titre,
+        message,
+        icon=messagebox.WARNING,
+        default=messagebox.NO,
+        parent=parent,
+    )
+
+
+def _fichier_a_lire_reel(parent: tk.Misc) -> str:
+    return filedialog.askopenfilename(
+        parent=parent,
+        title="Fichier des utilisateurs",
+        filetypes=[("CSV", "*.csv"), ("Tous les fichiers", "*.*")],
+    )
+
+
+def _fichier_a_ecrire_reel(parent: tk.Misc) -> str:
+    return filedialog.asksaveasfilename(
+        parent=parent,
+        title="Enregistrer les mots de passe",
+        defaultextension=".csv",
+        filetypes=[("CSV", "*.csv")],
+    )
+
+
+@dataclass(frozen=True)
+class Dialogues:
+    """Les boîtes modales de la fenêtre, injectables. Défaut : le vrai comportement.
+
+    Une modale Tk fait tourner une boucle d'événements imbriquée et n'en sort qu'au
+    clic d'un humain : rien d'automatique ne la traverse. Les six défauts ci-dessus
+    sont donc les seules lignes de ce fichier qu'aucun test ne peut exécuter, et
+    substituer ce groupe rend vérifiable tout ce qui les entoure — laquelle s'ouvre,
+    avec quel texte, et ce que la fenêtre fait de la réponse.
+    """
+
+    erreur: AfficherBoite = _erreur_reelle
+    information: AfficherBoite = _information_reelle
+    avertissement: AfficherBoite = _avertissement_reel
+    question_grave: PoserQuestionGrave = _question_grave_reelle
+    fichier_a_lire: ChoisirFichier = _fichier_a_lire_reel
+    fichier_a_ecrire: ChoisirFichier = _fichier_a_ecrire_reel
+
+
+# Les boîtes de production : ce que voit l'opérateur, et le défaut de la fenêtre.
+DIALOGUES_REELS = Dialogues()
 
 
 class _Racine(tk.Tk):
@@ -130,7 +214,16 @@ class _Racine(tk.Tk):
 class Fenetre:
     """Fenêtre principale. Tous ses widgets vivent dans le fil de l'interface."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        dialogues: Dialogues = DIALOGUES_REELS,
+        fabriquer_boitier: Callable[[Connexion], Boitier] = boitier_de_la_connexion,
+    ) -> None:
+        # Les deux seules coutures de ce fichier, toutes deux au défaut de production :
+        # les boîtes modales, qu'aucun test ne peut traverser, et la fabrique de
+        # boîtier, qui ouvrirait une vraie session SSL sur un vrai firewall.
+        self.dialogues = dialogues
+        self.fabriquer_boitier = fabriquer_boitier
         self.racine = _Racine(self._signaler_exception_tk)
         self.racine.title(TITRE)
         # Vrai entre le démarrage d'un fil de lot et son message terminal : c'est ce
@@ -308,11 +401,7 @@ class Fenetre:
     # --- saisie ----------------------------------------------------------
 
     def _parcourir(self) -> None:
-        chemin = filedialog.askopenfilename(
-            parent=self.racine,
-            title="Fichier des utilisateurs",
-            filetypes=[("CSV", "*.csv"), ("Tous les fichiers", "*.*")],
-        )
+        chemin = self.dialogues.fichier_a_lire(self.racine)
         if chemin:
             self.var_fichier.set(chemin)
 
@@ -346,10 +435,10 @@ class Fenetre:
                 POLITIQUE_INITIALE if self.plancher is None else self._politique_des_champs()
             )
         except tk.TclError:
-            messagebox.showerror(
+            self.dialogues.erreur(
                 "Longueur invalide",
                 "La longueur des mots de passe doit être un nombre entier.",
-                parent=self.racine,
+                self.racine,
             )
             return
         parametres = Parametres(
@@ -360,15 +449,15 @@ class Fenetre:
         )
         obstacles = obstacles_au_lancement(parametres, self.plancher)
         if obstacles:
-            messagebox.showerror("Lancement refusé", "\n".join(obstacles), parent=self.racine)
+            self.dialogues.erreur("Lancement refusé", "\n".join(obstacles), self.racine)
             return
         try:
             utilisateurs, rejets = lecture.lire(chemin)
         except lecture.ColonnesManquantes as erreur:
-            messagebox.showerror("Fichier invalide", str(erreur), parent=self.racine)
+            self.dialogues.erreur("Fichier invalide", str(erreur), self.racine)
             return
         except OSError as erreur:
-            messagebox.showerror("Fichier illisible", str(erreur), parent=self.racine)
+            self.dialogues.erreur("Fichier illisible", str(erreur), self.racine)
             return
         if not self._confirmer_la_perte_des_secrets():
             return
@@ -393,12 +482,10 @@ class Fenetre:
         en_attente = self.enregistrables.secrets_en_attente
         if not en_attente:
             return True
-        return messagebox.askyesno(
+        return self.dialogues.question_grave(
             "Mots de passe non enregistrés",
             avertissement_perte_de_secrets(en_attente),
-            icon=messagebox.WARNING,
-            default=messagebox.NO,
-            parent=self.racine,
+            self.racine,
         )
 
     def _demarrer(
@@ -422,11 +509,15 @@ class Fenetre:
         file: queue.Queue[MessageFil] = queue.Queue()
         arret = DemandeArret()
         self.arret = arret
+        # Même règle que pour `arret` : la fabrique est recopiée dans une variable locale
+        # avant de partir. C'est une fonction du métier, sans le moindre widget, et rien
+        # qui ressemble à `self` ne doit apparaître dans la construction du fil.
+        fabriquer = self.fabriquer_boitier
         fil = threading.Thread(
             target=travailler,
             # `rejets` voyage jusqu'au fil : le plan en a besoin pour ne pas annoncer
             # orphelin un compte dont la ligne a seulement été rejetée.
-            args=(parametres, utilisateurs, file.put, rejets, arret),
+            args=(parametres, utilisateurs, file.put, rejets, arret, fabriquer),
             daemon=True,
         )
         self.lot_en_cours = True
@@ -498,7 +589,7 @@ class Fenetre:
             self._planifier(0, lambda: self._boite_d_anomalie(resume))
 
     def _boite_d_anomalie(self, resume: str) -> None:
-        messagebox.showerror("Anomalie interne", resume, parent=self.racine)
+        self.dialogues.erreur("Anomalie interne", resume, self.racine)
 
     def _signaler_exception_tk(self, erreur: BaseException) -> None:
         """Ce que Tk attrape hors de la pompe. Dernier recours : `stderr` s'il en reste."""
@@ -522,9 +613,7 @@ class Fenetre:
                 # Non terminal : le `Termine` qui suit réactivera le bouton *Lancer*.
                 lignes = lignes_de_la_politique_refusee(refus)
                 self._ecrire_lignes(lignes)
-                messagebox.showerror(
-                    "Politique refusée", "\n".join(lignes), parent=self.racine
-                )
+                self.dialogues.erreur("Politique refusée", "\n".join(lignes), self.racine)
             case PlanPret(plan):
                 self._ecrire_lignes(lignes_du_plan(plan))
             case DemandeConfirmation() as demande:
@@ -551,7 +640,7 @@ class Fenetre:
             case Echoue(texte):
                 self._ecrire(texte)
                 self._reactiver_lancement()
-                messagebox.showerror("Arrêt", texte, parent=self.racine)
+                self.dialogues.erreur("Arrêt", texte, self.racine)
             case AnnuaireManquant():
                 self._reactiver_lancement()
                 self._ouvrir_fenetre_annuaire()
@@ -570,12 +659,8 @@ class Fenetre:
         """
         accorde = False
         try:
-            accorde = messagebox.askyesno(
-                "Écrire sur le firewall",
-                demande.texte,
-                icon=messagebox.WARNING,
-                default=messagebox.NO,
-                parent=self.racine,
+            accorde = self.dialogues.question_grave(
+                "Écrire sur le firewall", demande.texte, self.racine
             )
         finally:
             demande.repondre(accorde)
@@ -601,24 +686,19 @@ class Fenetre:
     def _enregistrer_mots_de_passe(self) -> None:
         comptes = self.enregistrables.comptes
         if not comptes:
-            messagebox.showinfo(
+            self.dialogues.information(
                 "Rien à enregistrer",
                 "Aucun compte n'a été créé : il n'y a aucun mot de passe à écrire.",
-                parent=self.racine,
+                self.racine,
             )
             return
-        chemin = filedialog.asksaveasfilename(
-            parent=self.racine,
-            title="Enregistrer les mots de passe",
-            defaultextension=".csv",
-            filetypes=[("CSV", "*.csv")],
-        )
+        chemin = self.dialogues.fichier_a_ecrire(self.racine)
         if not chemin:
             return
         try:
             sortie.ecrire_mots_de_passe(Path(chemin), comptes)
         except OSError as erreur:
-            messagebox.showerror("Écriture impossible", str(erreur), parent=self.racine)
+            self.dialogues.erreur("Écriture impossible", str(erreur), self.racine)
             return
         # Marqué seulement ici, et seulement sur l'instantané réellement écrit : le
         # sélecteur de fichier a fait tourner la boucle d'événements, et les comptes
@@ -682,8 +762,8 @@ class Fenetre:
 
         def fermer() -> None:
             if self.creation_annuaire_en_cours:
-                messagebox.showwarning(
-                    "Création en cours", FERMETURE_PENDANT_CREATION, parent=dialogue
+                self.dialogues.avertissement(
+                    "Création en cours", FERMETURE_PENDANT_CREATION, dialogue
                 )
                 return
             oublier_les_saisies()
@@ -696,10 +776,10 @@ class Fenetre:
                     self._ecrire(f"annuaire {domaine} créé et activé")
                     oublier_les_saisies()
                     dialogue.destroy()
-                    messagebox.showinfo(
+                    self.dialogues.information(
                         "Annuaire créé",
                         f"L'annuaire {domaine} est créé et activé. Relancez le lot.",
-                        parent=self.racine,
+                        self.racine,
                     )
                 case Journal(texte):
                     self._ecrire(texte)
@@ -710,9 +790,9 @@ class Fenetre:
                     # fenêtre principale, il ne doit pas se perdre.
                     if dialogue.winfo_exists():
                         bouton.configure(state=tk.NORMAL)
-                        messagebox.showerror("Création refusée", texte, parent=dialogue)
+                        self.dialogues.erreur("Création refusée", texte, dialogue)
                     else:
-                        messagebox.showerror("Création refusée", texte, parent=self.racine)
+                        self.dialogues.erreur("Création refusée", texte, self.racine)
                 case _:
                     # Remis à faux ici aussi : un message terminal inconnu tomberait
                     # dans cette branche, la pompe s'arrêterait, et le dialogue comme
@@ -738,21 +818,22 @@ class Fenetre:
                 if not valeur
             ]
             if manquants:
-                messagebox.showerror(
+                self.dialogues.erreur(
                     "Champ manquant",
                     "À renseigner : " + ", ".join(manquants),
-                    parent=dialogue,
+                    dialogue,
                 )
                 return
             bouton.configure(state=tk.DISABLED)
             # Champs lus ici, dans le fil de l'interface : rien de `self` ne voyage
             # jusqu'au fil, pas même le temps d'un appel.
             session = self._connexion_des_champs()
+            fabriquer = self.fabriquer_boitier
             file: queue.Queue[MessageFil] = queue.Queue()
             self.creation_annuaire_en_cours = True
             threading.Thread(
                 target=travailler_annuaire,
-                args=(session, annuaire, file.put),
+                args=(session, annuaire, file.put, fabriquer),
                 daemon=True,
             ).start()
             # Le secret est parti avec `annuaire` : il n'a plus rien à faire dans Tcl.
@@ -779,12 +860,8 @@ class Fenetre:
             creation_annuaire_en_cours=self.creation_annuaire_en_cours,
             secrets_en_attente=self.enregistrables.secrets_en_attente,
         )
-        if avertissement is not None and not messagebox.askyesno(
-            "Fermer la fenêtre",
-            avertissement,
-            icon=messagebox.WARNING,
-            default=messagebox.NO,
-            parent=self.racine,
+        if avertissement is not None and not self.dialogues.question_grave(
+            "Fermer la fenêtre", avertissement, self.racine
         ):
             return
         self.racine.destroy()
