@@ -10,15 +10,25 @@ firewall SNS de maquette.
 
 ## Pourquoi ce cahier n'est pas une formalité
 
-Deux modules entiers du produit n'ont **jamais été exécutés** :
+Ce que les tests unitaires ne prouvent pas :
 
-- `stormshield_utilisateurs/fenetre.py` — la machine de développement n'a pas `tkinter`.
-  Aucun test ne l'importe, aucun ne l'importera. Ce cahier est sa **seule** couverture.
 - `stormshield_utilisateurs/boitier_sdk.py` — écrit contre la documentation SNS et contre le
   SDK réellement installé, mais **il n'a jamais parlé à un vrai boîtier**. Plusieurs de ses
   choix sont des hypothèses, listées en section F pour la v1 et en section R pour la v2 —
   la forme des membres rendus par `USER GROUP SHOW`, la syntaxe de cette commande et la
   sensibilité du boîtier à la casse ; elles se confirment ou se démentent ici.
+- `stormshield_utilisateurs/fenetre.py` — depuis le 2026-09-18, `tests/test_fenetre.py`
+  construit de vrais widgets sous `xvfb-run` et en couvre 98 %. Ce cahier n'en est donc
+  plus la seule couverture, mais il reste **le seul juge** de ce qu'aucun test ne peut
+  atteindre : l'apparence, les six défauts de `Dialogues` — de vraies boîtes modales, dont
+  on ne sort qu'au clic d'un humain —, et `lancer()`, qui construit la fenêtre de production
+  puis entre dans `mainloop`.
+
+> Ce paragraphe a longtemps affirmé que la machine de développement n'avait pas `tkinter`,
+> et qu'aucun test n'importerait jamais `fenetre.py`. C'était faux : le paquet
+> `python3-tk` n'était simplement pas installé. L'affirmation est restée deux nuits dans ce
+> document, qui fait autorité, et a servi à justifier qu'on ne couvre pas un module entier.
+> Elle est corrigée ici, et sa trace est gardée : une limitation déclarée se vérifie.
 
 Les tests unitaires prouvent que le code fait ce qui a été écrit. Ce cahier prouve que le produit fait ce qu'on attend. Les cas déjà couverts en
 unitaire y figurent donc **volontairement**.
