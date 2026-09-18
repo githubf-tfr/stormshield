@@ -41,9 +41,6 @@ Tenu à la main.
   seule couverture de `fenetre.py` — voir « Couverture de `fenetre.py` » — mais il reste le
   seul moyen de confirmer les hypothèses de `boitier_sdk.py` (sections F et R du cahier),
   et le seul juge de l'apparence, des vraies boîtes modales et de `lancer()`.
-- **Republier le `.exe`.** Celui de `v2.0.0` est antérieur à la campagne de couverture, qui
-  a modifié `fenetre.py` et `__main__.py` : il ne porte donc pas les coutures injectables.
-  Poser un tag après fusion de la couverture.
 - **Lancer le `.exe` sous Windows.** `exe.yml` a tourné deux fois et publié un binaire de
   14 Mo, ce qui prouve que PyInstaller collecte le paquet — rien ne prouve que la fenêtre
   s'ouvre. C'est le premier pas de la recette, et il ne demande aucun boîtier.
@@ -138,6 +135,45 @@ aucune profondeur. Les cibles sont désormais aplaties récursivement, et un dé
 entaché entache **tous** les noms qu'il pose : la garde ne tente pas d'apparier source
 et cibles. Sur-refuser ne coûte rien tant qu'un tel nom ne part pas dans un fil ; un
 faux négatif, lui, ne se voit jamais.
+
+### Le workflow que personne n'avait fait tourner (2026-09-18)
+
+La campagne de couverture réécrivait `qualite.yml` — installation de `python3-tk` et
+`xvfb`, refus d'un saut, plancher de tests. **Sa branche n'a jamais été poussée** : le
+workflow est arrivé sur `main` sans avoir jamais vu un runner, et il a échoué au premier
+tour. Une branche qui modifie l'intégration continue se pousse avant de fusionner, sinon
+la fusion *est* le premier essai.
+
+L'étape ne disait rien de ce qui l'avait tuée : `Process completed with exit code 1`, et
+rien d'autre. Elle tourne sous `bash -e`, et `resultat=$(xvfb-run -a pytest …)` mourait
+à l'affectation dès que `pytest` sortait en non-zéro — **avant** le premier `echo`. Les
+trois garde-fous étaient donc muets par construction, y compris celui qui venait de se
+déclencher. Le verdict passe désormais par une variable et les causes sortent en
+annotations `::error::`.
+
+Les annotations, et pas le journal, parce que **les logs de job sont inaccessibles
+depuis le bac à sable de développement** : `blob.core.windows.net` répond
+`x509: certificate signed by unknown authority`. Les annotations passent par l'API
+`github.com`, elles. C'est le seul canal de diagnostic disponible d'ici, et c'est pour
+ça que le workflow doit se raconter lui-même.
+
+Une annotation `::error::` s'arrête à la première fin de ligne : un message multi-ligne
+perd tout sauf sa première ligne s'il n'encode pas ses sauts en `%0A`. Ça nous a trompés
+une fois.
+
+La cause du rouge, une fois visible : un seul test, `fenetre.py`, **sous 3.12
+seulement**. Une `tkinter.Variable` orpheline d'une fenêtre de test détruite se faisait
+ramasser par le GC cyclique sur le fil d'un lot ; son `__del__` interroge le Tcl de sa
+racine morte, et tkinter, appelé hors du fil principal, poste l'appel à la boucle
+d'événements puis **attend** — boucle qui n'existe plus. `gc.collect()` après
+`destroy()` rend la collecte synchrone et la garde sur le fil principal.
+
+Rien à corriger en production : il y faut une racine détruite pendant qu'un fil tourne.
+La suite crée et détruit ~500 racines dans un même processus, la production n'en crée
+qu'une et ne la détruit qu'en partant. Le seuil du GC générationnel diffère assez entre
+versions pour que la collecte tombe sur un fil différent selon la version — d'où 3.12
+seul, et d'où l'invisibilité totale en local, où le Python est 3.14. **Une suite verte
+sur une version que la CI ne teste pas ne prouve rien de celles qu'elle teste.**
 
 ### Numérotation des releases (2026-09-17)
 
