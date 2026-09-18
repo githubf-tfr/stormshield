@@ -41,8 +41,12 @@ Tenu à la main.
   seule couverture de `fenetre.py` — voir « Couverture de `fenetre.py` » — mais il reste le
   seul moyen de confirmer les hypothèses de `boitier_sdk.py` (sections F et R du cahier),
   et le seul juge de l'apparence, des vraies boîtes modales et de `lancer()`.
-- Poser le tag `v1.0.0` pour déclencher la première construction du `.exe`. Le workflow
-  `exe.yml` n'a jamais tourné : aucun runner ne l'a validé avant ce tag.
+- **Republier le `.exe`.** Celui de `v2.0.0` est antérieur à la campagne de couverture, qui
+  a modifié `fenetre.py` et `__main__.py` : il ne porte donc pas les coutures injectables.
+  Poser un tag après fusion de la couverture.
+- **Lancer le `.exe` sous Windows.** `exe.yml` a tourné deux fois et publié un binaire de
+  14 Mo, ce qui prouve que PyInstaller collecte le paquet — rien ne prouve que la fenêtre
+  s'ouvre. C'est le premier pas de la recette, et il ne demande aucun boîtier.
 - Spec de l'injection de blacklists : granularité (objet réseau vs groupe URL), purge ou
   ajout seul.
 
