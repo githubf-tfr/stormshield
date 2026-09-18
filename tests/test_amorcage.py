@@ -8,7 +8,7 @@ from typing import Any, cast
 import pytest
 
 import stormshield_utilisateurs
-from stormshield_utilisateurs.__main__ import texte_d_echec
+from stormshield_utilisateurs.__main__ import alerter_hors_interface, principal, texte_d_echec
 from stormshield_utilisateurs.presentation import texte_de_demarrage_impossible
 
 PRESENTATION = "stormshield_utilisateurs.presentation"
@@ -52,6 +52,80 @@ def test_le_filet_tient_meme_si_presentation_ne_s_importe_pas(
     assert "n'a pas pu démarrer" in texte
     assert "ModuleNotFoundError" in texte
     assert "No module named 'stormshield_utilisateurs'" in texte
+
+
+def test_alerter_hors_interface_delegue_a_la_boite_de_message_sous_windows() -> None:
+    """Sous Windows, seule la boîte de message est appelée — jamais le repli."""
+    recus: list[str] = []
+
+    def _afficheur_de_repli_interdit(texte: str) -> None:
+        raise AssertionError(f"le repli ne doit pas être appelé : {texte!r}")
+
+    alerter_hors_interface(
+        "un échec",
+        plateforme="win32",
+        boite_de_message=recus.append,
+        afficheur_de_repli=_afficheur_de_repli_interdit,
+    )
+    assert recus == ["un échec"]
+
+
+def test_alerter_hors_interface_replie_sur_l_afficheur_ailleurs_que_sous_windows() -> None:
+    """Ailleurs que sous Windows, seul le repli est appelé — jamais la boîte de message."""
+    recus: list[str] = []
+
+    def _boite_de_message_interdite(texte: str) -> None:
+        raise AssertionError(f"la boîte de message ne doit pas être appelée : {texte!r}")
+
+    alerter_hors_interface(
+        "un échec",
+        plateforme="linux",
+        boite_de_message=_boite_de_message_interdite,
+        afficheur_de_repli=recus.append,
+    )
+    assert recus == ["un échec"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="vérifie l'absence de l'API sous Windows")
+def test_la_vraie_boite_de_message_est_inatteignable_hors_windows() -> None:
+    """La vraie boîte de message n'est pas simulable sans substituer `ctypes` lui-même —
+    ce que ce dépôt refuse. Ce test documente la seule limite honnête : sur cette machine
+    (ni Windows), `ctypes.windll` n'existe pas, et c'est cette absence même qui est
+    prouvée ici, plutôt que supposée.
+    """
+    with pytest.raises(AttributeError, match="windll"):
+        alerter_hors_interface("un échec", plateforme="win32")
+
+
+def test_alerter_hors_interface_ecrit_vraiment_sur_stderr_par_defaut(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Sans rien injecter, hors Windows, le texte part réellement sur `stderr`."""
+    alerter_hors_interface("un échec bien réel")
+    assert "un échec bien réel" in capsys.readouterr().err
+
+
+def test_principal_rend_0_si_l_interface_se_lance_sans_lever() -> None:
+    """`lancer_l_interface` est la couture : elle évite d'importer `fenetre`, donc
+    `tkinter`, pour ne prouver que le code de sortie."""
+    assert principal(lancer_l_interface=lambda: None) == 0
+
+
+def test_principal_rend_1_et_rend_l_echec_visible_si_l_interface_leve(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Aucune exception ne doit remonter plus haut que `principal` : elle doit à la
+    fois se traduire en code de sortie et arriver, en texte, sur `stderr`."""
+
+    def _interface_qui_leve() -> None:
+        raise RuntimeError("l'interface refuse de démarrer")
+
+    code = principal(lancer_l_interface=_interface_qui_leve)
+    assert code == 1
+    erreur_affichee = capsys.readouterr().err
+    assert "n'a pas pu démarrer" in erreur_affichee
+    assert "RuntimeError" in erreur_affichee
+    assert "l'interface refuse de démarrer" in erreur_affichee
 
 
 def test_le_point_d_entree_n_importe_rien_du_paquet_au_niveau_module() -> None:
