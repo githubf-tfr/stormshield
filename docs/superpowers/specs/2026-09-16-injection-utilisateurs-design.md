@@ -404,11 +404,19 @@ Commandes utilisées, une par aller-retour, et aucune autre :
 | `USER CREATE uid=<uid> name=<nom> [gname=<prenom>] [domainname=<ldap>]` | création ; `uid` et `name` requis |
 | `USER PASSWORD dn=<UserID>\|<UserDN> password=<mdp> [hash=…]` | mot de passe ; arguments non journalisés |
 | `USER GROUP CREATE "<nom>"` | création de groupe |
-| `USER GROUP ADDUSER <groupe>\|<DN groupe> <UserId>\|<UserDN>` | appartenance |
+| `USER GROUP ADDUSER "<groupe>" <UserId>` | appartenance ; groupe cité, voir ci-dessous |
 | `CONFIG PASSWDPOLICY SHOW` | lecture de la politique (lecture seule) |
 | `CONFIG LDAP LIST` | présence de l'annuaire interne |
 | `CONFIG LDAP INITIALIZE domainname= o= dc= password= [realbind=on\|off]` | création de l'annuaire, chemin conditionnel |
 | `CONFIG LDAP ACTIVATE` | activation de l'annuaire |
+
+**Déviation actée : le groupe d'`ADDUSER` part entre guillemets doubles**, alors que la
+documentation SNS l'écrit nu. `USER GROUP CREATE` cite le nom — un nom de groupe peut porter un
+espace —, et un groupe créé sous `"compta bis"` serait définitivement inadressable si l'ajout de
+membre, lui, envoyait `compta bis` nu : le boîtier y verrait deux jetons et découperait la
+commande autrement, en silence. Citer des deux côtés ou d'aucun ; l'outil cite. Le `uid`, lui,
+reste nu : il est contraint en amont à `^[a-z0-9._-]+$`. Ce choix est repris dans
+`stormshield_utilisateurs/boitier_sdk.py` et figé par `tests/test_boitier_sdk.py`.
 
 Certains `uid` sont interdits par le boîtier (`admin`, `ha`, …). L'outil ne tient pas de liste
 locale de ces interdits (voir « Points non vérifiés ») : un `uid` refusé se manifeste comme un
