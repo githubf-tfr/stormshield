@@ -33,7 +33,13 @@ jobs:
         # Aucun test ne doit être sauté sur ce runner. Un saut y voudrait dire que
         # l'affichage manque : les tests d'interface passeraient au vert sans avoir rien
         # prouvé, et c'est exactement ce que ce workflow doit rendre impossible.
+        #
+        # Le refus d'un saut ne suffit pas : un fichier qui cesserait d'être *collecté* —
+        # renommé, sorti de `testpaths`, cassé à l'import — ne saute rien et laisse l'étape
+        # verte. D'où le plancher : il se relève quand il devient absurdement bas, jamais
+        # dans le même commit qu'une suppression de tests.
         run: |
+          PLANCHER=480
           resultat=$(xvfb-run -a pytest -m "not firewall" -q --no-header)
           echo "$resultat"
           case "$resultat" in
@@ -42,3 +48,8 @@ jobs:
               exit 1
               ;;
           esac
+          passes=$(printf '%s\n' "$resultat" | grep -oE '[0-9]+ passed' | tail -1 | cut -d' ' -f1)
+          if [ -z "$passes" ] || [ "$passes" -lt "$PLANCHER" ]; then
+            echo "::error::${passes:-0} tests passés, plancher $PLANCHER : un fichier entier a-t-il cessé d'être collecté ?"
+            exit 1
+          fi
