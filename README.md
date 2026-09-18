@@ -172,20 +172,27 @@ identifiant n'est stocké dans le repo : ils sont fournis à l'exécution.
 ## Pour qui développe
 
 ```bash
+sudo apt-get install python3-tk xvfb   # une fois : la fenêtre se teste sur de vrais widgets
 pip install -e '.[dev]'
-ruff check .          # avant tout commit
-mypy                  # avant tout commit
-pytest                # marqueur firewall exclu par défaut
-pytest -m firewall    # exige un boîtier SNS joignable
+ruff check .                # avant tout commit
+mypy                        # avant tout commit
+xvfb-run -a pytest          # la suite complète ; marqueur firewall exclu par défaut
+pytest -m firewall          # exige un boîtier SNS joignable
 ```
 
-Aucun test n'exige de firewall ni de `tkinter` : tout appel réseau passe par une dépendance
-injectable, et toute la logique de l'interface vit dans `presentation.py`, que
-`fenetre.py` se contente de câbler sur des widgets.
+**`pytest` nu ne prouve pas tout.** `tests/test_fenetre.py` construit la vraie fenêtre : sans
+`tkinter` ou sans affichage, ses tests se **sautent** — la suite reste verte, mais l'interface
+n'a rien prouvé. Un saut se lit dans la ligne de résultat (`… passed, … skipped`) ; si elle en
+annonce, relancer sous `xvfb-run -a`. Sous Windows, `pytest` nu suffit : il y a un affichage.
+C'est ce que fait `qualite.yml`, qui installe `python3-tk` et `xvfb` puis refuse un test sauté.
 
-Ce que les tests ne couvrent pas — la fenêtre elle-même et l'adaptateur SDK face à un vrai
-boîtier — relève du cahier de recette, sous [`docs/recette/`](./docs/recette/), à exécuter à
-la main dès qu'un SNS est joignable.
+Aucun test n'exige de firewall : tout appel réseau passe par une dépendance injectable. Toute
+la logique de l'interface vit dans `presentation.py`, qui n'importe jamais `tkinter` et se teste
+sans affichage ; `fenetre.py` se contente de la câbler sur des widgets.
+
+Ce que les tests ne couvrent pas — l'apparence, les vraies boîtes modales, `lancer()`, et
+l'adaptateur SDK face à un vrai boîtier — relève du cahier de recette, sous
+[`docs/recette/`](./docs/recette/), à exécuter à la main dès qu'un SNS est joignable.
 
 Le `.exe` se construit **uniquement** par le workflow
 [`.github/workflows/exe.yml`](./.github/workflows/exe.yml), déclenché par un tag `v*` :

@@ -9,6 +9,8 @@ c'était le seul que ce filet ne rattrapait pas.
 """
 
 import sys
+from collections.abc import Callable
+from typing import Any, cast
 
 TITRE_ERREUR = "Injection d'utilisateurs SNS"
 
@@ -38,26 +40,68 @@ def texte_d_echec(erreur: BaseException) -> str:
         return TEXTE_DE_REPLI.format(type=type(erreur).__name__, erreur=erreur)
 
 
-def alerter_hors_interface(texte: str) -> None:
-    """Rend un échec visible sans `tkinter` ni console.
-
-    Sous Windows, la boîte de message du système : c'est le seul canal qui reste à un
-    exécutable fenêtré. Ailleurs, `stderr` s'il existe.
+def _ouvrir_la_boite_de_message(texte: str) -> None:
+    """La vraie boîte de message Windows : le seul canal qui reste à un exécutable
+    fenêtré sans console. Inatteignable pour de vrai ailleurs que sous Windows —
+    `ctypes.windll` n'existe pas sur les autres plateformes.
     """
-    if sys.platform == "win32":
-        import ctypes
+    import ctypes
 
-        # MB_ICONERROR ; le handle de fenêtre est nul, il n'y a aucune fenêtre.
-        ctypes.windll.user32.MessageBoxW(0, texte, TITRE_ERREUR, 0x10)
-        return
+    # `windll` n'existe que dans les stubs Windows de `ctypes` : ce `cast` fait taire
+    # mypy, qui type-vérifie ce fichier depuis une machine qui ne l'est pas, plutôt que
+    # de cacher la ligne derrière un `if sys.platform == "win32"` littéral qui la
+    # rendrait inatteignable aux tests.
+    #
+    # Ce que ce `cast` coûte, et qui n'est pas nul : sous le test littéral de plateforme,
+    # mypy vérifiait cette ligne contre les stubs Windows — nom de la fonction, nombre et
+    # type des arguments. `cast(Any, …)` efface cette vérification, sur toutes les
+    # plateformes. Une faute de frappe dans `MessageBoxW`, un argument en trop, ne se
+    # verrait plus qu'à l'exécution, sur un poste Windows, dans le seul chemin que
+    # l'opérateur emprunte quand tout le reste a déjà échoué — donc en recette, cas 5.
+    # MB_ICONERROR ; le handle de fenêtre est nul, il n'y a aucune fenêtre.
+    cast(Any, ctypes).windll.user32.MessageBoxW(0, texte, TITRE_ERREUR, 0x10)
+
+
+def _ecrire_sur_stderr(texte: str) -> None:
+    """Repli hors Windows : `stderr` s'il existe, rien sinon (exécutable fenêtré)."""
     if sys.stderr is not None:
         print(texte, file=sys.stderr)
 
 
-def principal() -> int:
-    """Rend un code de sortie. Aucune exception ne remonte plus haut."""
+def alerter_hors_interface(
+    texte: str,
+    *,
+    plateforme: str = sys.platform,
+    boite_de_message: Callable[[str], None] = _ouvrir_la_boite_de_message,
+    afficheur_de_repli: Callable[[str], None] = _ecrire_sur_stderr,
+) -> None:
+    """Rend un échec visible sans `tkinter` ni console.
+
+    Sous Windows, la boîte de message du système : c'est le seul canal qui reste à un
+    exécutable fenêtré. Ailleurs, `stderr` s'il existe.
+
+    `plateforme`, `boite_de_message` et `afficheur_de_repli` sont les coutures qui
+    rendent ce choix vérifiable : la vraie boîte de message n'existe que sous Windows.
+    """
+    if plateforme == "win32":
+        boite_de_message(texte)
+        return
+    afficheur_de_repli(texte)
+
+
+def principal(*, lancer_l_interface: Callable[[], None] | None = None) -> int:
+    """Rend un code de sortie. Aucune exception ne remonte plus haut.
+
+    `lancer_l_interface` est la couture : la vraie interface importe `tkinter`, que
+    les tests ne doivent pas charger. L'import réel n'est tenté que si rien n'est
+    fourni.
+    """
     try:
-        from stormshield_utilisateurs.fenetre import lancer
+        lancer = lancer_l_interface
+        if lancer is None:
+            from stormshield_utilisateurs.fenetre import lancer as lancer_reel
+
+            lancer = lancer_reel
 
         lancer()
     except Exception as erreur:

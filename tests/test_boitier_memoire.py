@@ -64,6 +64,45 @@ def test_initialisation_puis_activation_d_un_annuaire() -> None:
     assert boitier.lister_annuaires() == ["neuf.local"]
 
 
+def test_initialiser_un_annuaire_alors_qu_un_existe_deja_est_refuse() -> None:
+    """Le boîtier réel n'admet qu'un seul annuaire actif ; le double doit le refuser
+    aussi, sinon un test vert n'exercerait jamais ce chemin.
+
+    Le motif est asséré, pas seulement le type : sans lui, le double pourrait se mettre à
+    refuser pour une tout autre raison — un argument vide, un nom déjà pris — sans qu'un
+    seul test ne le dise, et le chemin qu'on croit exercer ne serait plus exercé.
+    """
+    boitier = BoitierMemoire()
+    with pytest.raises(ErreurCommande, match="un annuaire existe déjà"):
+        boitier.initialiser_annuaire("neuf.local", "Societe", "dc=neuf,dc=local", "secret-factice")
+
+
+def test_activer_un_annuaire_sans_initialisation_prealable_est_refuse() -> None:
+    boitier = BoitierMemoire(annuaires=[])
+    with pytest.raises(ErreurCommande, match="aucun annuaire à activer"):
+        boitier.activer_annuaire()
+
+
+def test_creer_deux_fois_le_meme_groupe_est_refuse() -> None:
+    boitier = BoitierMemoire(groupes=["compta"])
+    with pytest.raises(ErreurCommande, match="le groupe compta existe déjà"):
+        boitier.creer_groupe("compta")
+
+
+def test_creer_un_groupe_avec_un_guillemet_double_dans_le_nom_est_refuse() -> None:
+    """Le nom est transmis verbatim entre guillemets doubles : un guillemet dans le
+    nom casserait la commande, donc le double refuse la création."""
+    boitier = BoitierMemoire()
+    with pytest.raises(ErreurCommande, match="guillemet double interdit"):
+        boitier.creer_groupe('compta"rh')
+
+
+def test_definir_le_mot_de_passe_d_un_utilisateur_inconnu_est_refuse() -> None:
+    boitier = BoitierMemoire()
+    with pytest.raises(ErreurCommande, match="utilisateur dupont inconnu"):
+        boitier.definir_mot_de_passe("dupont", "Abc123!x")
+
+
 def test_les_membres_sont_rendus_sous_forme_de_dn() -> None:
     """Un code qui comparerait un identifiant à un membre échouerait sur chaque test au
     lieu d'en passer quelques-uns."""

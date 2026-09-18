@@ -437,7 +437,15 @@ orphelins — se calcule hors ligne et se teste sans firewall.
 
 | Opération | Commande | Rend |
 |---|---|---|
-| `lister_membres(groupe)` | `USER GROUP SHOW group=<identité rendue par LIST>` | les DN des membres |
+| `lister_membres(groupe)` | `USER GROUP SHOW group="<identité rendue par LIST>"` | les DN des membres |
+
+**Déviation actée : l'identité part entre guillemets doubles**, comme partout ailleurs dans ce
+produit. Un nom de groupe peut porter un espace, et l'identité transmise ici est celle que
+`USER GROUP LIST` a rendue, verbatim : envoyée nue, `group=compta bis` donnerait deux jetons au
+boîtier, qui découperait la commande autrement et en silence. La syntaxe du mot-clé `group=` est
+par ailleurs une hypothèse non vérifiée (cahier de recette, cas 123) ; le guillemet ne l'aggrave
+pas. Ce choix est repris dans `stormshield_utilisateurs/boitier_sdk.py` et figé par
+`tests/test_boitier_sdk.py`.
 
 `boitier_sdk.py` reste le seul module à importer le SDK, et reste mince : la surface non prouvée
 doit être la plus petite possible. Le périmètre resserré la laisse à une seule commande nouvelle,

@@ -2,13 +2,14 @@
 
 import ast
 import sys
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 import stormshield_utilisateurs
-from stormshield_utilisateurs.__main__ import texte_d_echec
+from stormshield_utilisateurs.__main__ import alerter_hors_interface, principal, texte_d_echec
 from stormshield_utilisateurs.presentation import texte_de_demarrage_impossible
 
 PRESENTATION = "stormshield_utilisateurs.presentation"
@@ -54,17 +55,158 @@ def test_le_filet_tient_meme_si_presentation_ne_s_importe_pas(
     assert "No module named 'stormshield_utilisateurs'" in texte
 
 
-def test_le_point_d_entree_n_importe_rien_du_paquet_au_niveau_module() -> None:
-    """Le filet ne doit dépendre d'aucun import que son propre mode d'échec casse."""
-    source = Path(stormshield_utilisateurs.__file__).with_name("__main__.py")
-    arbre = ast.parse(source.read_text(encoding="utf-8"))
-    importes: list[str] = []
-    for noeud in arbre.body:
+def test_alerter_hors_interface_delegue_a_la_boite_de_message_sous_windows() -> None:
+    """Sous Windows, seule la boîte de message est appelée — jamais le repli."""
+    recus: list[str] = []
+
+    def _afficheur_de_repli_interdit(texte: str) -> None:
+        raise AssertionError(f"le repli ne doit pas être appelé : {texte!r}")
+
+    alerter_hors_interface(
+        "un échec",
+        plateforme="win32",
+        boite_de_message=recus.append,
+        afficheur_de_repli=_afficheur_de_repli_interdit,
+    )
+    assert recus == ["un échec"]
+
+
+def test_alerter_hors_interface_replie_sur_l_afficheur_ailleurs_que_sous_windows() -> None:
+    """Ailleurs que sous Windows, seul le repli est appelé — jamais la boîte de message."""
+    recus: list[str] = []
+
+    def _boite_de_message_interdite(texte: str) -> None:
+        raise AssertionError(f"la boîte de message ne doit pas être appelée : {texte!r}")
+
+    alerter_hors_interface(
+        "un échec",
+        plateforme="linux",
+        boite_de_message=_boite_de_message_interdite,
+        afficheur_de_repli=recus.append,
+    )
+    assert recus == ["un échec"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="vérifie l'absence de l'API sous Windows")
+def test_la_vraie_boite_de_message_est_inatteignable_hors_windows() -> None:
+    """La vraie boîte de message n'est pas simulable sans substituer `ctypes` lui-même —
+    ce que ce dépôt refuse. Ce test documente la seule limite honnête : sur cette machine
+    (ni Windows), `ctypes.windll` n'existe pas, et c'est cette absence même qui est
+    prouvée ici, plutôt que supposée.
+    """
+    with pytest.raises(AttributeError, match="windll"):
+        alerter_hors_interface("un échec", plateforme="win32")
+
+
+def test_alerter_hors_interface_ecrit_vraiment_sur_stderr_par_defaut(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Sans rien injecter, hors Windows, le texte part réellement sur `stderr`."""
+    alerter_hors_interface("un échec bien réel")
+    assert "un échec bien réel" in capsys.readouterr().err
+
+
+def test_principal_rend_0_si_l_interface_se_lance_sans_lever() -> None:
+    """`lancer_l_interface` est la couture : elle évite d'importer `fenetre`, donc
+    `tkinter`, pour ne prouver que le code de sortie."""
+    assert principal(lancer_l_interface=lambda: None) == 0
+
+
+def test_principal_rend_1_et_rend_l_echec_visible_si_l_interface_leve(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Aucune exception ne doit remonter plus haut que `principal` : elle doit à la
+    fois se traduire en code de sortie et arriver, en texte, sur `stderr`."""
+
+    def _interface_qui_leve() -> None:
+        raise RuntimeError("l'interface refuse de démarrer")
+
+    code = principal(lancer_l_interface=_interface_qui_leve)
+    assert code == 1
+    erreur_affichee = capsys.readouterr().err
+    assert "n'a pas pu démarrer" in erreur_affichee
+    assert "RuntimeError" in erreur_affichee
+    assert "l'interface refuse de démarrer" in erreur_affichee
+
+
+# Ce que `__main__.py` a le droit d'importer hors d'une fonction. Liste blanche et non
+# liste noire : le filet doit refuser aussi ce qu'on n'a pas su prévoir. Ces trois-là sont
+# des modules purement Python de la bibliothèque standard, présents dès qu'un interpréteur
+# l'est ; `tkinter`, lui, est une extension compilée liée à Tcl/Tk, que PyInstaller peut
+# ne pas collecter et qu'une machine peut ne pas avoir — c'est *le* mode d'échec pour
+# lequel ce filet existe.
+_IMPORTS_ADMIS_HORS_FONCTION = frozenset({"sys", "collections.abc", "typing"})
+
+
+def _imports_hors_fonction(noeuds: Iterable[ast.AST]) -> Iterator[str]:
+    """Tout ce qui s'importe à l'import du module, corps de fonction exclus.
+
+    Descend dans les `if`, `try` et corps de classe — ils s'exécutent à l'import — mais
+    s'arrête à la porte des fonctions : c'est justement là que ce module doit mettre ses
+    imports, sous le filet.
+    """
+    for noeud in noeuds:
+        if isinstance(noeud, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
         if isinstance(noeud, ast.Import):
-            importes.extend(alias.name for alias in noeud.names)
+            yield from (alias.name for alias in noeud.names)
         elif isinstance(noeud, ast.ImportFrom):
-            importes.append(noeud.module or "")
-    assert not [nom for nom in importes if nom.startswith("stormshield_utilisateurs")]
+            yield noeud.module or ""
+        else:
+            yield from _imports_hors_fonction(ast.iter_child_nodes(noeud))
+
+
+def _imports_refuses(source: str) -> list[str]:
+    """Les imports hors fonction que la liste blanche n'admet pas.
+
+    Ce que cette règle **ne garantit pas** : elle lit des noms d'imports, pas ce qu'ils
+    coûtent. Un module admis qui se mettrait à en importer un autre, un `importlib` caché
+    dans une expression, un effet de bord d'un `.pth` : rien de cela ne se voit ici. Elle
+    attrape l'import distrait — celui qu'on ajoute en tête de fichier sans y penser —,
+    qui est le seul qui se soit produit.
+    """
+    return sorted(
+        nom
+        for nom in _imports_hors_fonction(ast.parse(source).body)
+        if nom not in _IMPORTS_ADMIS_HORS_FONCTION
+    )
+
+
+def test_le_point_d_entree_n_importe_rien_hors_fonction_qui_puisse_manquer() -> None:
+    """Le filet ne doit dépendre d'aucun import que son propre mode d'échec casse.
+
+    Ni le paquet, ni `tkinter` : un import qui échoue au niveau module tombe avant que le
+    filet n'existe, la trace part sur un `stderr` qu'un exécutable fenêtré n'a pas, et
+    l'exécutable ne fait alors simplement rien.
+    """
+    source = Path(stormshield_utilisateurs.__file__).with_name("__main__.py")
+    assert _imports_refuses(source.read_text(encoding="utf-8")) == []
+
+
+def test_la_garde_du_filet_refuse_tkinter_en_tete_du_point_d_entree() -> None:
+    """La garde d'origine ne regardait que les imports du paquet : `import tkinter` en
+    tête de `__main__.py` la laissait verte, alors que c'est le mode d'échec même contre
+    lequel ce fichier est écrit."""
+    assert _imports_refuses("import tkinter\nimport sys\n") == ["tkinter"]
+
+
+def test_la_garde_du_filet_refuse_le_paquet_en_tete_du_point_d_entree() -> None:
+    assert _imports_refuses("from stormshield_utilisateurs.fenetre import lancer\n") == [
+        "stormshield_utilisateurs.fenetre"
+    ]
+
+
+def test_la_garde_du_filet_voit_un_import_caché_dans_un_try_de_niveau_module() -> None:
+    """Un import de niveau module reste un import de niveau module, quel que soit le bloc
+    qui l'entoure : il s'exécute avant que `principal` n'existe."""
+    assert _imports_refuses("try:\n    import tkinter\nexcept ImportError:\n    pass\n") == [
+        "tkinter"
+    ]
+
+
+def test_la_garde_du_filet_laisse_passer_un_import_dans_une_fonction() -> None:
+    """C'est l'usage légitime, et le seul : l'import tenté sous le filet."""
+    assert _imports_refuses("def principal():\n    import tkinter\n") == []
 
 
 def _appelants_du_mot_de_passe(source: str) -> dict[str, set[str]]:

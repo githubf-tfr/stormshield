@@ -37,10 +37,16 @@ Tenu à la main.
 
 - **Exécuter `docs/recette/2026-09-16-cahier-recette-v1.md` dès qu'un boîtier est
   joignable.** 139 cas, dont 22 jouables sans boîtier sur un poste Windows et le `.exe` de
-  la release, et 117 exigeant un boîtier joignable. C'est la seule couverture de `fenetre.py`
-  et le seul moyen de confirmer les hypothèses de `boitier_sdk.py` (sections F et R du cahier).
-- Poser le tag `v1.0.0` pour déclencher la première construction du `.exe`. Le workflow
-  `exe.yml` n'a jamais tourné : aucun runner ne l'a validé avant ce tag.
+  la release, et 117 exigeant un boîtier joignable. Depuis le 2026-09-18 il n'est plus la
+  seule couverture de `fenetre.py` — voir « Couverture de `fenetre.py` » — mais il reste le
+  seul moyen de confirmer les hypothèses de `boitier_sdk.py` (sections F et R du cahier),
+  et le seul juge de l'apparence, des vraies boîtes modales et de `lancer()`.
+- **Republier le `.exe`.** Celui de `v2.0.0` est antérieur à la campagne de couverture, qui
+  a modifié `fenetre.py` et `__main__.py` : il ne porte donc pas les coutures injectables.
+  Poser un tag après fusion de la couverture.
+- **Lancer le `.exe` sous Windows.** `exe.yml` a tourné deux fois et publié un binaire de
+  14 Mo, ce qui prouve que PyInstaller collecte le paquet — rien ne prouve que la fenêtre
+  s'ouvre. C'est le premier pas de la recette, et il ne demande aucun boîtier.
 - Spec de l'injection de blacklists : granularité (objet réseau vs groupe URL), purge ou
   ajout seul.
 
@@ -90,6 +96,37 @@ complétude de `USER LIST`, relevée après son écriture et qu'aucun cas ne cou
 _(rien)_
 
 ## Terminé
+
+### Couverture de `fenetre.py` (2026-09-18)
+
+`fenetre.py` était le seul module qu'aucun test n'avait jamais touché : **328
+instructions jamais exécutées**, sur la foi d'une affirmation fausse — « `tkinter` est
+absent de cette machine ». Le paquet n'était pas installé, voilà tout. Avec `python3-tk`
+et `xvfb` : **98 %** (351/358), 65 tests dans `tests/test_fenetre.py`.
+
+Ce qui a rendu la chose possible, deux coutures sur `Fenetre`, toutes deux au défaut de
+production : `Dialogues`, qui regroupe les six boîtes modales — une modale Tk n'en sort
+qu'au clic d'un humain —, et `fabriquer_boitier`, qui ouvrirait sinon une vraie session
+SSL. Mêmes titres, mêmes textes, même icône et même bouton *Non* par défaut : rien de ce
+que voit l'opérateur n'a changé.
+
+Ce qui résiste, et pourquoi c'est définitif : les six défauts de `Dialogues` (un appel
+chacun à `messagebox`/`filedialog`) et le corps de `lancer()`, qui construit la fenêtre
+de production puis entre dans `mainloop`. Sept instructions, toutes couvertes par le
+cahier de recette.
+
+**`pytest` nu reste vert sans affichage** — le fichier se saute avec la raison que Tk
+donne lui-même — et `qualite.yml` installe `python3-tk` + `xvfb` puis échoue si un test
+a été sauté : un saut sur le runner voudrait dire que l'interface est verte sans avoir
+rien prouvé.
+
+Le garde qui interdisait à `presentation.py` d'importer `tkinter` est **gardé** : c'est
+une frontière d'architecture, indépendante de toute machine. Celui qui vérifie ce qui
+part dans un fil est **gardé et intact** ; les deux objets qui franchissent la frontière
+(la demande d'arrêt, la fabrique) sont recopiés dans des variables locales et ne portent
+aucun widget. La « garde qui interdisait aux tests d'importer `tkinter` » n'a jamais
+existé comme test : c'était une affirmation dans trois docstrings, devenue fausse et
+corrigée.
 
 ### Numérotation des releases (2026-09-17)
 
@@ -183,11 +220,12 @@ Modules livrés, du plus pur au plus impur :
 | `execution` | Lecture d'état, application du plan, reconnexions, émission d'événements |
 | `sortie` | CSV de restitution des mots de passe |
 | `presentation` | Toute la logique de l'interface, sans un seul widget. N'importe jamais `tkinter` |
-| `fenetre` | Seul module à importer `tkinter`, et le seul qu'aucun test n'importe |
+| `fenetre` | Seul module à importer `tkinter`. Testé sous `xvfb-run` depuis le 2026-09-18 |
 | `__main__` | Point d'entrée, cible de PyInstaller, filet de démarrage |
 
-- **273 tests** passent (marqueur `firewall` exclu), `ruff` et `mypy` verts, aucun
-  `# type: ignore`.
+- **505 tests** passent sous `xvfb-run` (marqueur `firewall` exclu), `ruff` et `mypy`
+  verts, aucun `# type: ignore`. Ce compte est celui du produit entier, v2 comprise ; il
+  était de 273 à la livraison de la v1.
 - Workflows : `qualite.yml` (`ruff`, `mypy`, `pytest` en matrice 3.11 / 3.12) et `exe.yml`
   (PyInstaller `--onefile --windowed` sur `windows-latest`, release sur tag `v*`).
 - `README.md` refondu pour l'opérateur : format du CSV, simulation, mots de passe,
