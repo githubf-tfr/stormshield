@@ -751,6 +751,41 @@ def test_ce_que_tk_attrape_hors_de_la_pompe_part_au_journal() -> None:
         assert boites.titres_des_erreurs == ["Anomalie interne"]
 
 
+def _anomalie_hors_pompe(fenetre: Fenetre) -> None:
+    """Provoque une anomalie interne, et laisse sa boîte s'ouvrir.
+
+    Un rappel de widget qui lève : Tk le remonte par `report_callback_exception`, donc au
+    signalement d'anomalie de la fenêtre. La boîte n'est jamais ouverte depuis là — elle est
+    planifiée pour le tour de boucle suivant, que l'`update()` fait tourner.
+    """
+
+    def rappel_qui_leve() -> None:
+        raise ValueError("un rappel a lâché")
+
+    ttk.Button(fenetre.racine, command=rappel_qui_leve).invoke()
+    fenetre.racine.update()
+
+
+def test_un_second_lot_a_droit_a_sa_propre_boite_d_anomalie(tmp_path: Path) -> None:
+    """Le silence gagné par la première anomalie ne vaut que pour le lot qui a parlé.
+
+    Sans la réinitialisation au démarrage d'un lot, l'opérateur qui relance ne verrait plus
+    jamais de boîte d'anomalie pour le reste de la session — et le journal de la fenêtre est
+    le seul autre endroit où une anomalie existe, le produit n'ayant aucun fichier de trace.
+    """
+    boitier = BoitierMemoire(groupes=["profs"])
+    with _fenetre_ouverte(boitier=boitier) as (fenetre, boites):
+        _remplir(fenetre, _csv(tmp_path))
+        fenetre.bouton_lancer.invoke()
+        assert _tourner(fenetre, lambda: not fenetre.lot_en_cours)
+        _anomalie_hors_pompe(fenetre)
+        assert boites.titres_des_erreurs == ["Anomalie interne"]
+        fenetre.bouton_lancer.invoke()
+        assert _tourner(fenetre, lambda: not fenetre.lot_en_cours)
+        _anomalie_hors_pompe(fenetre)
+        assert boites.titres_des_erreurs == ["Anomalie interne", "Anomalie interne"]
+
+
 def test_une_exception_tk_apres_la_destruction_de_la_fenetre_part_sur_stderr(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
