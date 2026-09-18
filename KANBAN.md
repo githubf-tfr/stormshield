@@ -122,11 +122,22 @@ rien prouvé.
 
 Le garde qui interdisait à `presentation.py` d'importer `tkinter` est **gardé** : c'est
 une frontière d'architecture, indépendante de toute machine. Celui qui vérifie ce qui
-part dans un fil est **gardé et intact** ; les deux objets qui franchissent la frontière
+part dans un fil est **gardé et étendu** ; les deux objets qui franchissent la frontière
 (la demande d'arrêt, la fabrique) sont recopiés dans des variables locales et ne portent
 aucun widget. La « garde qui interdisait aux tests d'importer `tkinter` » n'a jamais
 existé comme test : c'était une affirmation dans trois docstrings, devenue fausse et
 corrigée.
+
+Cette garde a été élargie deux fois, chaque fois sur un trou trouvé en cherchant à la
+contourner et non en la relisant. D'abord le **blanchiment par variable locale** —
+`publieur = self._appliquer` puis `args=(…, publieur)` — que la campagne venait
+justement d'introduire comme idiome de production. Ensuite le **déballage de tuple** :
+`publieur, _rien = self._appliquer, 1` range ses cibles dans un unique `ast.Tuple`, et
+la garde ne lisait que les `ast.Name` de premier niveau — aucun nom n'en sortait, à
+aucune profondeur. Les cibles sont désormais aplaties récursivement, et un déballage
+entaché entache **tous** les noms qu'il pose : la garde ne tente pas d'apparier source
+et cibles. Sur-refuser ne coûte rien tant qu'un tel nom ne part pas dans un fil ; un
+faux négatif, lui, ne se voit jamais.
 
 ### Numérotation des releases (2026-09-17)
 
