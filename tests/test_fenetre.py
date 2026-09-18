@@ -284,6 +284,30 @@ def _saisies(dialogue: tk.Toplevel) -> list[ttk.Entry]:
     return [enfant for enfant in cadre.winfo_children() if isinstance(enfant, ttk.Entry)]
 
 
+def _sonde_du_champ(racine: tk.Misc, champ: ttk.Entry) -> tuple[tk.StringVar, list[str]]:
+    """Note toute valeur écrite dans la variable Tcl d'un champ, au moment où elle l'est.
+
+    Le secret vit dans l'interpréteur Tcl, pas dans le widget : c'est de là qu'il doit
+    disparaître. Le prouver par une lecture après la fermeture est impossible — la
+    `StringVar` de Python meurt avec les fermetures du dialogue détruit et, en mourant,
+    supprime la variable Tcl ; la lecture lèverait alors « no such variable », qu'on ait
+    effacé le secret ou non. Une sonde posée sur la variable existante, elle, voit
+    l'écriture passer.
+
+    La sonde est rendue à l'appelant, qui doit la garder en vie : sa disparition
+    supprimerait la variable Tcl, c'est-à-dire ferait elle-même l'effacement qu'on
+    prétend mesurer.
+    """
+    ecritures: list[str] = []
+    sonde = tk.StringVar(racine, name=str(champ.cget("textvariable")))
+
+    def noter(*_: str) -> None:
+        ecritures.append(sonde.get())
+
+    sonde.trace_add("write", noter)
+    return sonde, ecritures
+
+
 def _bouton_du_dialogue(dialogue: tk.Toplevel) -> ttk.Button:
     cadre = dialogue.winfo_children()[0]
     boutons = [enfant for enfant in cadre.winfo_children() if isinstance(enfant, ttk.Button)]
@@ -1067,13 +1091,21 @@ def test_fermer_le_dialogue_pendant_la_creation_est_refuse() -> None:
 
 
 def test_fermer_le_dialogue_hors_creation_l_efface_avec_ses_saisies() -> None:
+    """Le mot de passe de `cn=StormshieldAdmin` ne doit pas rester dans l'interpréteur Tcl
+    le reste de la session : la fermeture écrase les quatre champs avant de détruire le
+    dialogue."""
     with _fenetre_ouverte() as (fenetre, boites):
         fenetre._appliquer(AnnuaireManquant())
         dialogue = _dialogue_annuaire(fenetre)
-        _saisies(dialogue)[3].insert(0, "Secret-Admin-1234")
+        champ_secret = _saisies(dialogue)[3]
+        champ_secret.insert(0, "Secret-Admin-1234")
+        sonde, ecritures = _sonde_du_champ(fenetre.racine, champ_secret)
+        assert sonde.get() == "Secret-Admin-1234", "la sonde ne lit pas le champ du secret"
         _fermer_comme_le_gestionnaire(dialogue)
         assert boites.avertissements == []
         assert not dialogue.winfo_exists()
+        # Une écriture, et c'est l'effacement : sans elle, le secret resterait dans Tcl.
+        assert ecritures == [""]
 
 
 # --- fermeture de la fenêtre ----------------------------------------------
