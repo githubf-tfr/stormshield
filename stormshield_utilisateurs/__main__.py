@@ -51,6 +51,13 @@ def _ouvrir_la_boite_de_message(texte: str) -> None:
     # mypy, qui type-vérifie ce fichier depuis une machine qui ne l'est pas, plutôt que
     # de cacher la ligne derrière un `if sys.platform == "win32"` littéral qui la
     # rendrait inatteignable aux tests.
+    #
+    # Ce que ce `cast` coûte, et qui n'est pas nul : sous le test littéral de plateforme,
+    # mypy vérifiait cette ligne contre les stubs Windows — nom de la fonction, nombre et
+    # type des arguments. `cast(Any, …)` efface cette vérification, sur toutes les
+    # plateformes. Une faute de frappe dans `MessageBoxW`, un argument en trop, ne se
+    # verrait plus qu'à l'exécution, sur un poste Windows, dans le seul chemin que
+    # l'opérateur emprunte quand tout le reste a déjà échoué — donc en recette, cas 5.
     # MB_ICONERROR ; le handle de fenêtre est nul, il n'y a aucune fenêtre.
     cast(Any, ctypes).windll.user32.MessageBoxW(0, texte, TITRE_ERREUR, 0x10)
 
