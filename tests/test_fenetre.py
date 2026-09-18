@@ -238,6 +238,11 @@ def _tourner(
         if condition():
             return True
         if time.monotonic() >= limite:
+            # DIAGNOSTIC TEMPORAIRE — retiré une fois la cause établie (ci/diagnostic-qualite).
+            import faulthandler
+            import sys as _sys
+
+            faulthandler.dump_traceback(file=_sys.stderr, all_threads=True)
             return False
         time.sleep(0.005)
 

@@ -90,7 +90,7 @@ jobs:
             # attrapés dans `executer()` ne le fait jamais autrement), la section
             # « Captured stderr call » qui le montre. Sans ce bloc, un `_tourner` qui
             # expire en silence après vingt secondes ne nomme aucune cause.
-            detail=$(printf '%s\n' "$resultat" | awk '/^=+ FAILURES =+$/{f=1;next} /^=+ short test summary info =+$/{f=0} f' | head -60 | encoder)
+            detail=$(printf '%s\n' "$resultat" | awk '/^=+ FAILURES =+$/{f=1;next} /^=+ short test summary info =+$/{f=0} f' | head -100 | encoder)
             if [ -n "$detail" ]; then
               echo "::error::${detail}"
             fi
