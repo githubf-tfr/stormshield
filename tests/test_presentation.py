@@ -1659,6 +1659,91 @@ def _fonctions_qui_atteignent_self(arbre: ast.Module) -> set[str]:
     }
 
 
+# Le seul attribut de la fenêtre qu'on admette de voir recopié dans une variable locale
+# avant de partir dans un fil : `fabriquer_boitier`, couture du constructeur, fonction du
+# métier injectée du dehors, sans le moindre widget. Tout autre `self.<x>` recopié est
+# refusé — `publieur = self._appliquer` en tête, qui blanchit une méthode de la fenêtre en
+# variable locale et que la règle ne savait pas distinguer de cet usage-ci. Ajouter un nom
+# à cette liste est une décision, pas une formalité : elle n'est vérifiée par rien d'autre
+# que la lecture qu'on en fait.
+_ATTRIBUTS_DE_SELF_ADMIS_EN_ALIAS = frozenset({"fabriquer_boitier"})
+
+
+def _chaine_d_attributs_sur_self(expression: ast.expr) -> bool:
+    """`self.a`, `self.a.b`, … : une chaîne d'attributs enracinée dans `self`."""
+    courant = expression
+    while isinstance(courant, ast.Attribute):
+        courant = courant.value
+    return isinstance(courant, ast.Name) and courant.id == "self"
+
+
+def _lecture_de_self_admise(valeur: ast.expr) -> bool:
+    """Vrai si cette expression peut donner son nom à une variable sans l'entacher.
+
+    Admis : ce qui ne mentionne pas `self` ; `self.<attribut>` de la liste blanche ; le
+    *résultat* d'un appel sur la fenêtre — `self._connexion_des_champs()`,
+    `self.var_simulation.get()` —, qui est une donnée lue dans le fil de l'interface et non
+    un morceau de fenêtre ; et ce dont le résultat est un booléen ou une chaîne, qui ne
+    portent aucune référence. C'est ce que fait la production avant de construire son fil.
+
+    Refusé par défaut : tout le reste, à commencer par `self._appliquer` nu et par une
+    méthode de la fenêtre passée en *argument* d'un appel qui, lui, n'est pas sur la
+    fenêtre — `partial(self._appliquer)` n'est pas un résultat, c'est le même blanchiment
+    habillé autrement. Refuser par défaut sur-refuse : `en_attente =
+    self.enregistrables.secrets_en_attente` est un entier, et il compte pourtant comme
+    entaché. Cela ne coûte rien tant qu'un tel nom ne part pas dans un fil, et c'est ce
+    qu'on veut pour une règle dont la liste blanche est la seule échappatoire.
+    """
+    if not _mentionne_self(valeur):
+        return True
+    if isinstance(valeur, ast.Compare | ast.BoolOp | ast.UnaryOp | ast.JoinedStr):
+        # Comparaison, négation, interpolation : le résultat est un booléen ou une chaîne,
+        # qui ne porte aucune référence. `self.plancher is None` n'emporte pas le plancher.
+        return True
+    if isinstance(valeur, ast.IfExp):
+        # Le test ne s'échappe pas de l'expression ; les deux branches, si.
+        return _lecture_de_self_admise(valeur.body) and _lecture_de_self_admise(valeur.orelse)
+    if isinstance(valeur, ast.Call):
+        if _chaine_d_attributs_sur_self(valeur.func):
+            # Appel *sur* la fenêtre : le résultat est une valeur, quoi qu'on lui passe.
+            return True
+        return all(
+            _lecture_de_self_admise(partie)
+            for partie in [valeur.func, *valeur.args, *(mot.value for mot in valeur.keywords)]
+        )
+    if isinstance(valeur, ast.Attribute):
+        if isinstance(valeur.value, ast.Name) and valeur.value.id == "self":
+            # `self.<attribut>` nu : une référence à un morceau de fenêtre.
+            return valeur.attr in _ATTRIBUTS_DE_SELF_ADMIS_EN_ALIAS
+        # `self.a.b` reste pris sur la fenêtre ; `self.a.b().c` part d'une valeur. On
+        # remonte la chaîne pour trancher entre les deux.
+        return _lecture_de_self_admise(valeur.value)
+    return False
+
+
+def _alias_de_self(arbre: ast.Module) -> set[str]:
+    """Noms de variables qui portent quelque chose venu de `self`, directement ou en chaîne.
+
+    `publieur = self._appliquer` puis `args=(…, publieur, …)` ne montre aucun jeton `self`
+    au point d'appel et ne nomme aucune fonction de ce source : sans cette passe, le fil
+    recevait une méthode de la fenêtre sans qu'une seule règle ne bronche. La boucle tourne
+    jusqu'au point fixe pour suivre les relais (`relais = publieur`).
+    """
+    affectations = [
+        (noeud.targets, noeud.value) for noeud in ast.walk(arbre) if isinstance(noeud, ast.Assign)
+    ]
+    alias: set[str] = set()
+    while True:
+        avant = set(alias)
+        for cibles, valeur in affectations:
+            entache = bool(_noms_mentionnes(valeur) & alias) or not _lecture_de_self_admise(valeur)
+            if not entache:
+                continue
+            alias.update(cible.id for cible in cibles if isinstance(cible, ast.Name))
+        if alias == avant:
+            return alias
+
+
 # Toute autre façon de lancer un fil que `threading.Thread(target=...)` est refusée en
 # bloc : la fenêtre n'en a aucun besoin, et refuser le constructeur coûte moins cher que
 # d'analyser ce qu'on lui passe. Comparaison sur le dernier segment du nom appelé, pour
@@ -1709,18 +1794,26 @@ def _fils_qui_pourraient_toucher_un_widget(source: str) -> list[str]:
 
     Ce que la règle vérifie : un fil ne peut naître que d'un `threading.Thread` doté
     d'un `target=` nommé, cette cible vient de `presentation` — module où `tkinter` est
-    interdit par un autre test —, et ni la cible ni les arguments ne mentionnent `self`
-    ni un nom de fonction de ce source qui, lui, atteint `self`. Les `args` comptent
-    autant que la cible : ils portent le publieur, c'est-à-dire ce que le fil appelle en
-    boucle, et ce publieur touche le journal, la barre, les boutons et les dialogues.
-    Toute autre façon de lancer un fil — `Timer`, exécuteur, sous-classe de `Thread` —
-    est refusée en bloc.
+    interdit par un autre test —, et ni la cible ni les arguments ne mentionnent `self`,
+    ni un nom de fonction de ce source qui, lui, atteint `self`, ni une variable recopiée
+    de `self` hors de la liste blanche `_ATTRIBUTS_DE_SELF_ADMIS_EN_ALIAS`. Les `args`
+    comptent autant que la cible : ils portent le publieur, c'est-à-dire ce que le fil
+    appelle en boucle, et ce publieur touche le journal, la barre, les boutons et les
+    dialogues. Toute autre façon de lancer un fil — `Timer`, exécuteur, sous-classe de
+    `Thread` — est refusée en bloc.
 
     Ce qu'elle **ne garantit pas**, et qu'aucune règle statique de cette forme ne
     garantira :
 
     - un widget rangé *dans* un objet passé au fil : la règle lit des noms, elle ne
       suit pas les valeurs. Un `Parametres` qui porterait un `tk.Entry` passerait ;
+    - ce qu'une méthode de la fenêtre **rend** : `session = self._connexion_des_champs()`
+      est admis — c'est une donnée lue dans le fil de l'interface, et c'est l'usage de
+      production. Un `publieur = self._fabriquer_un_publieur()` passerait donc aussi, et un
+      `x = self.envelopper(self._appliquer)` avec lui : la règle ne lit pas ce qu'une
+      méthode fait de ses arguments ;
+    - la liste blanche elle-même : elle dit quels attributs de la fenêtre peuvent voyager,
+      et rien ne vérifie qu'un nom y a été ajouté à bon droit ;
     - une capture indirecte : `def publier(m): aider(m)`, où seule `aider` atteint
       `self`, n'est pas vue — seule la mention directe de `self` dans le corps l'est ;
     - un widget atteint par une variable globale ou par un autre module, sans passer
@@ -1735,6 +1828,7 @@ def _fils_qui_pourraient_toucher_un_widget(source: str) -> list[str]:
     arbre = ast.parse(source)
     venus = _venus_de_presentation(arbre)
     dangereuses = _fonctions_qui_atteignent_self(arbre)
+    alias = _alias_de_self(arbre)
     infractions = _lanceurs_interdits(arbre) + _sous_classes_de_thread(arbre)
     for appel in _appels_de_fil(arbre, _noms_de_thread(arbre)):
         if appel.args:
@@ -1750,6 +1844,10 @@ def _fils_qui_pourraient_toucher_un_widget(source: str) -> list[str]:
             infractions.extend(
                 f"{mot.arg}= porte {nom}, qui atteint self"
                 for nom in sorted(_noms_mentionnes(mot.value) & dangereuses)
+            )
+            infractions.extend(
+                f"{mot.arg}= porte {nom}, recopié de self"
+                for nom in sorted(_noms_mentionnes(mot.value) & alias)
             )
     return infractions
 
@@ -1898,3 +1996,89 @@ def test_le_garde_fou_refuse_un_fil_lance_par_un_executeur() -> None:
 def test_le_garde_fou_refuse_une_sous_classe_de_thread() -> None:
     """Une sous-classe porte la fenêtre dans son état : aucun `target=` à inspecter."""
     assert _fils_qui_pourraient_toucher_un_widget(_FIL_PAR_SOUS_CLASSE) != []
+
+
+# Le blanchiment par variable locale. C'est l'idiome que la production emploie pour les
+# objets qui ont le droit de franchir la frontière — `fabriquer = self.fabriquer_boitier` —,
+# et c'est exactement sous cette forme qu'une méthode de la fenêtre pouvait passer.
+
+_FIL_A_ALIAS_DE_SELF = """
+import threading
+from stormshield_utilisateurs.presentation import travailler
+
+class Fenetre:
+    def _demarrer(self, parametres, utilisateurs):
+        file = queue.Queue()
+        publieur = self._appliquer
+        threading.Thread(
+            target=travailler, args=(parametres, utilisateurs, publieur), daemon=True
+        ).start()
+"""
+
+_FIL_A_ALIAS_ENCHAINE = """
+import threading
+from stormshield_utilisateurs.presentation import travailler
+
+class Fenetre:
+    def _demarrer(self, parametres, utilisateurs):
+        publieur = self._appliquer
+        relais = publieur
+        threading.Thread(
+            target=travailler, args=(parametres, utilisateurs, relais), daemon=True
+        ).start()
+"""
+
+_FIL_A_PARTIEL_DE_SELF = """
+import functools
+import threading
+from stormshield_utilisateurs.presentation import travailler
+
+class Fenetre:
+    def _demarrer(self, parametres, utilisateurs):
+        publieur = functools.partial(self._appliquer, "lot")
+        threading.Thread(
+            target=travailler, args=(parametres, utilisateurs, publieur), daemon=True
+        ).start()
+"""
+
+_FIL_A_ALIAS_ADMIS = """
+import threading
+from stormshield_utilisateurs.presentation import travailler
+
+class Fenetre:
+    def _demarrer(self, parametres, utilisateurs):
+        file = queue.Queue()
+        session = self._connexion_des_champs()
+        fabriquer = self.fabriquer_boitier
+        threading.Thread(
+            target=travailler,
+            args=(session, parametres, utilisateurs, file.put, fabriquer),
+            daemon=True,
+        ).start()
+"""
+
+
+def test_le_garde_fou_refuse_un_publieur_blanchi_en_variable_locale() -> None:
+    """Le trou que la campagne de couverture a rendu pertinent : `x = self.<attribut>`
+    recopié avant `args=` est désormais l'idiome de la production, et la règle ne savait
+    pas le distinguer d'un contournement."""
+    infractions = _fils_qui_pourraient_toucher_un_widget(_FIL_A_ALIAS_DE_SELF)
+    assert any("publieur, recopié de self" in infraction for infraction in infractions)
+
+
+def test_le_garde_fou_refuse_un_alias_qui_passe_par_un_relais() -> None:
+    infractions = _fils_qui_pourraient_toucher_un_widget(_FIL_A_ALIAS_ENCHAINE)
+    assert any("relais, recopié de self" in infraction for infraction in infractions)
+
+
+def test_le_garde_fou_refuse_une_methode_de_la_fenetre_emballee_dans_un_partiel() -> None:
+    """Un appel rend une valeur, et la règle s'arrête là — sauf quand `self` est dans les
+    arguments de cet appel : ce n'est plus un résultat, c'est la méthode elle-même."""
+    infractions = _fils_qui_pourraient_toucher_un_widget(_FIL_A_PARTIEL_DE_SELF)
+    assert any("publieur, recopié de self" in infraction for infraction in infractions)
+
+
+def test_le_garde_fou_laisse_passer_les_deux_alias_de_la_production() -> None:
+    """La fabrique de boîtier recopiée, et la connexion lue dans le fil de l'interface :
+    fermer le trou ne doit pas interdire ce que la fenêtre fait vraiment."""
+    assert _fils_qui_pourraient_toucher_un_widget(_FIL_A_ALIAS_ADMIS) == []
