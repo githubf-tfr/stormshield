@@ -78,16 +78,15 @@ jobs:
             if [ -n "$resume" ]; then
               echo "::error::${resume}"
             fi
-            # Un fil d'exécution démarré par un test (le métier tourne hors du fil
-            # principal) qui lève une exception non attrapée ne la remonte jamais à
-            # pytest par le mécanisme habituel : `threading.excepthook` l'écrit sur
-            # stderr, que pytest capture dans la section « Captured stderr call » de
-            # la sortie du test, avant le résumé court. Sans ce grep, cette trace
-            # reste invisible : ni saut, ni échec pytest classique, juste un
-            # `_tourner` qui expire en silence après vingt secondes.
-            fil=$(printf '%s\n' "$resultat" | grep -A 12 "Exception in thread" | head -16)
-            if [ -n "$fil" ]; then
-              echo "::error::exception dans un fil d'exécution : ${fil}"
+            # Le corps du rapport d'échec — entre « FAILURES » et le résumé court —
+            # porte le contexte de l'assertion et, si un fil d'exécution a écrit sur
+            # stderr pendant le test (un fil qui lève une exception hors des cas
+            # attrapés dans `executer()` ne le fait jamais autrement), la section
+            # « Captured stderr call » qui le montre. Sans ce bloc, un `_tourner` qui
+            # expire en silence après vingt secondes ne nomme aucune cause.
+            detail=$(printf '%s\n' "$resultat" | awk '/^=+ FAILURES =+$/{f=1;next} /^=+ short test summary info =+$/{f=0} f' | head -60)
+            if [ -n "$detail" ]; then
+              echo "::error::${detail}"
             fi
             ECHEC=1
           fi
