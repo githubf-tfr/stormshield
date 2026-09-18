@@ -1721,6 +1721,22 @@ def _lecture_de_self_admise(valeur: ast.expr) -> bool:
     return False
 
 
+def _noms_de_cibles(cibles: list[ast.expr]) -> list[str]:
+    """Noms visés par une affectation, à travers un déballage de tuple ou de liste.
+
+    `a, b = …` porte ses cibles dans un unique `ast.Tuple` — pas dans deux `ast.Name` — et
+    `a, (b, c) = …` les imbrique. On aplatit récursivement plutôt que de lire seulement les
+    cibles de premier niveau, sous peine de ne voir aucun nom du tout.
+    """
+    noms: list[str] = []
+    for cible in cibles:
+        if isinstance(cible, ast.Name):
+            noms.append(cible.id)
+        elif isinstance(cible, ast.Tuple | ast.List):
+            noms.extend(_noms_de_cibles(cible.elts))
+    return noms
+
+
 def _alias_de_self(arbre: ast.Module) -> set[str]:
     """Noms de variables qui portent quelque chose venu de `self`, directement ou en chaîne.
 
@@ -1728,6 +1744,11 @@ def _alias_de_self(arbre: ast.Module) -> set[str]:
     au point d'appel et ne nomme aucune fonction de ce source : sans cette passe, le fil
     recevait une méthode de la fenêtre sans qu'une seule règle ne bronche. La boucle tourne
     jusqu'au point fixe pour suivre les relais (`relais = publieur`).
+
+    Un déballage (`a, b = self._appliquer, sain()`) entache tous les noms qu'il pose, pas
+    seulement celui qui reçoit réellement `self` : la règle ne détaille pas l'appariement
+    entre la source et les cibles, elle sur-refuse par construction, comme le reste de ce
+    garde-fou.
     """
     affectations = [
         (noeud.targets, noeud.value) for noeud in ast.walk(arbre) if isinstance(noeud, ast.Assign)
@@ -1739,7 +1760,7 @@ def _alias_de_self(arbre: ast.Module) -> set[str]:
             entache = bool(_noms_mentionnes(valeur) & alias) or not _lecture_de_self_admise(valeur)
             if not entache:
                 continue
-            alias.update(cible.id for cible in cibles if isinstance(cible, ast.Name))
+            alias.update(_noms_de_cibles(cibles))
         if alias == avant:
             return alias
 
@@ -2082,3 +2103,64 @@ def test_le_garde_fou_laisse_passer_les_deux_alias_de_la_production() -> None:
     """La fabrique de boîtier recopiée, et la connexion lue dans le fil de l'interface :
     fermer le trou ne doit pas interdire ce que la fenêtre fait vraiment."""
     assert _fils_qui_pourraient_toucher_un_widget(_FIL_A_ALIAS_ADMIS) == []
+
+
+# Le déballage de tuple : `_alias_de_self` lisait `noeud.targets` en ne retenant que les
+# `ast.Name` de premier niveau, et un déballage range ses cibles dans un unique `ast.Tuple`
+# — aucun nom n'en sortait alors, quelle que soit la profondeur.
+
+_FIL_A_ALIAS_PAR_DEBALLAGE_SIMPLE = """
+import threading
+from stormshield_utilisateurs.presentation import travailler
+
+class Fenetre:
+    def _demarrer(self, parametres, utilisateurs):
+        publieur, _rien = self._appliquer, 1
+        threading.Thread(
+            target=travailler, args=(parametres, utilisateurs, publieur), daemon=True
+        ).start()
+"""
+
+_FIL_A_ALIAS_PAR_DEBALLAGE_IMBRIQUE = """
+import threading
+from stormshield_utilisateurs.presentation import travailler
+
+class Fenetre:
+    def _demarrer(self, parametres, utilisateurs):
+        _rien, (publieur, _autre) = 1, (self._appliquer, 2)
+        threading.Thread(
+            target=travailler, args=(parametres, utilisateurs, publieur), daemon=True
+        ).start()
+"""
+
+_FIL_A_ALIAS_CHAINE = """
+import threading
+from stormshield_utilisateurs.presentation import travailler
+
+class Fenetre:
+    def _demarrer(self, parametres, utilisateurs):
+        a = publieur = self._appliquer
+        threading.Thread(
+            target=travailler, args=(parametres, utilisateurs, publieur), daemon=True
+        ).start()
+"""
+
+
+def test_le_garde_fou_refuse_un_alias_pose_par_un_deballage_simple() -> None:
+    """`publieur, _rien = self._appliquer, 1` : la cible n'est pas un `ast.Name`, c'est un
+    `ast.Tuple` qui en contient deux — la version aveugle au déballage laissait passer."""
+    infractions = _fils_qui_pourraient_toucher_un_widget(_FIL_A_ALIAS_PAR_DEBALLAGE_SIMPLE)
+    assert any("publieur, recopié de self" in infraction for infraction in infractions)
+
+
+def test_le_garde_fou_refuse_un_alias_pose_par_un_deballage_imbrique() -> None:
+    """`_rien, (publieur, _autre) = …` : le `ast.Tuple` des cibles en contient un second."""
+    infractions = _fils_qui_pourraient_toucher_un_widget(_FIL_A_ALIAS_PAR_DEBALLAGE_IMBRIQUE)
+    assert any("publieur, recopié de self" in infraction for infraction in infractions)
+
+
+def test_le_garde_fou_refuse_toujours_un_alias_chaine() -> None:
+    """Non-régression : `a = publieur = self._appliquer` pose ses cibles à plat dans
+    `noeud.targets` — sans passer par un `ast.Tuple` — et doit continuer de mordre."""
+    infractions = _fils_qui_pourraient_toucher_un_widget(_FIL_A_ALIAS_CHAINE)
+    assert any("publieur, recopié de self" in infraction for infraction in infractions)
