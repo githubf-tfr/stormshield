@@ -38,18 +38,47 @@ jobs:
         # renommé, sorti de `testpaths`, cassé à l'import — ne saute rien et laisse l'étape
         # verte. D'où le plancher : il se relève quand il devient absurdement bas, jamais
         # dans le même commit qu'une suppression de tests.
+        #
+        # `set +e` explicite : sous `bash -e`, l'affectation `resultat=$(pytest …)` mourait
+        # silencieusement dès que pytest sortait en non-zéro, avant le premier `echo` — les
+        # trois garde-fous ci-dessous ne parlaient jamais. `ECHEC` porte le verdict, les
+        # commandes de diagnostic ne tuent plus le script.
         run: |
+          set +e
           PLANCHER=480
-          resultat=$(xvfb-run -a pytest -m "not firewall" -q --no-header)
+          ECHEC=0
+
+          echo "::notice::Python : $(python3 --version 2>&1)"
+          info_tcltk=$(python3 -c 'import tkinter; print(f"Tcl {tkinter.TclVersion} / Tk {tkinter.TkVersion}")' 2>&1)
+          echo "::notice::Tcl/Tk : ${info_tcltk}"
+          collecte=$(xvfb-run -a pytest -m "not firewall" --collect-only -q 2>&1)
+          echo "::notice::Collecte : $(printf '%s\n' "$collecte" | tail -3 | tr '\n' ' ')"
+
+          resultat=$(xvfb-run -a pytest -m "not firewall" -q --no-header 2>&1)
+          code=$?
           echo "$resultat"
+
           case "$resultat" in
             *skipped*)
               echo "::error::des tests ont été sautés : xvfb ou tkinter manque sur ce runner"
-              exit 1
+              ECHEC=1
               ;;
           esac
+
           passes=$(printf '%s\n' "$resultat" | grep -oE '[0-9]+ passed' | tail -1 | cut -d' ' -f1)
           if [ -z "$passes" ] || [ "$passes" -lt "$PLANCHER" ]; then
             echo "::error::${passes:-0} tests passés, plancher $PLANCHER : un fichier entier a-t-il cessé d'être collecté ?"
-            exit 1
+            ECHEC=1
           fi
+
+          if [ "$code" -ne 0 ]; then
+            noms=$(printf '%s\n' "$resultat" | grep -E '^(FAILED|ERROR) ' | tr '\n' ' | ')
+            resume=$(printf '%s\n' "$resultat" | sed -n '/short test summary info/,$p' | head -20)
+            echo "::error::pytest a échoué (code ${code}) : ${noms:-voir le journal ci-dessus}"
+            if [ -n "$resume" ]; then
+              echo "::error::${resume}"
+            fi
+            ECHEC=1
+          fi
+
+          exit "$ECHEC"
