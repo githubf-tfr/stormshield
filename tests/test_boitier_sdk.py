@@ -179,6 +179,99 @@ def test_l_adaptateur_lit_les_membres_d_un_groupe() -> None:
     assert client.commandes == ['USER GROUP SHOW group="compta"']
 
 
+def test_l_adaptateur_liste_les_annuaires() -> None:
+    """Preuve du câblage : la méthode doit envoyer `CONFIG LDAP LIST`, pas une commande
+    voisine qui laisserait la suite verte sans rien prouver."""
+    client = _ClientFactice(reponse=_reponse_section_line("Result", ["domain=interne.local"]))
+    assert _adaptateur(client).lister_annuaires() == ["interne.local"]
+    assert client.commandes == ["CONFIG LDAP LIST"]
+
+
+def test_l_adaptateur_initialise_un_annuaire() -> None:
+    client = _ClientFactice()
+    _adaptateur(client).initialiser_annuaire("interne.local", "MonOrg", "interne", "SECRET-42")
+    assert client.commandes == [
+        "CONFIG LDAP INITIALIZE domainname=interne.local o=MonOrg "
+        "dc=interne password=SECRET-42"
+    ]
+
+
+def test_l_adaptateur_active_l_annuaire() -> None:
+    client = _ClientFactice()
+    _adaptateur(client).activer_annuaire()
+    assert client.commandes == ["CONFIG LDAP ACTIVATE"]
+
+
+def test_l_adaptateur_lit_la_politique_de_mot_de_passe() -> None:
+    client = _ClientFactice(
+        reponse=_reponse_section(
+            "PasswordPolicy", ["MinLength=12", "MinSetOfChars=AlphaNum", "MinEntropy=40"]
+        )
+    )
+    plancher = _adaptateur(client).lire_politique()
+    assert (plancher.longueur_min, plancher.nombre_classes_min, plancher.entropie_min) == (
+        12,
+        2,
+        40,
+    )
+    assert client.commandes == ["CONFIG PASSWDPOLICY SHOW"]
+
+
+def test_l_adaptateur_liste_les_utilisateurs() -> None:
+    client = _ClientFactice(reponse=_reponse_section_line("Result", ["name=dupont"]))
+    assert _adaptateur(client).lister_utilisateurs() == ["dupont"]
+    assert client.commandes == ["USER LIST"]
+
+
+def test_l_adaptateur_liste_les_groupes() -> None:
+    client = _ClientFactice(reponse=_reponse_section_line("Result", ["name=compta"]))
+    assert _adaptateur(client).lister_groupes() == ["compta"]
+    assert client.commandes == ["USER GROUP LIST"]
+
+
+def test_l_adaptateur_cree_un_groupe() -> None:
+    client = _ClientFactice()
+    _adaptateur(client).creer_groupe("compta bis")
+    assert client.commandes == ['USER GROUP CREATE "compta bis"']
+
+
+def test_l_adaptateur_cree_un_utilisateur() -> None:
+    client = _ClientFactice()
+    _adaptateur(client).creer_utilisateur("dupont", "Dupont", "Marie", "interne.local")
+    assert client.commandes == [
+        'USER CREATE uid=dupont name="Dupont" gname="Marie" domainname=interne.local'
+    ]
+
+
+def test_l_adaptateur_definit_un_mot_de_passe() -> None:
+    client = _ClientFactice()
+    _adaptateur(client).definir_mot_de_passe("dupont", "SECRET-42")
+    assert client.commandes == ["USER PASSWORD dn=dupont password=SECRET-42"]
+
+
+def test_l_adaptateur_ajoute_un_membre() -> None:
+    client = _ClientFactice()
+    _adaptateur(client).ajouter_membre("compta bis", "dupont")
+    assert client.commandes == ['USER GROUP ADDUSER "compta bis" dupont']
+
+
+def test_envoyer_sans_session_ouverte_leve_erreur_reseau() -> None:
+    """Aucun appel à `connecter()` : `_client` vaut None, et la commande ne doit pas partir
+    vers un client absent — c'est le garde, pas une reconnexion silencieuse, qui doit jouer."""
+
+    def _fabrique_qui_ne_doit_jamais_servir(**_: Any) -> Any:
+        raise AssertionError("aucune session ne doit être ouverte pour cet essai")
+
+    boitier = BoitierSDK(
+        HOTE_INEXISTANT,
+        SANS_IDENTITE,
+        SANS_IDENTITE,
+        fabrique_client=_fabrique_qui_ne_doit_jamais_servir,
+    )
+    with pytest.raises(ErreurReseau, match="aucune session ouverte"):
+        boitier.lister_utilisateurs()
+
+
 def test_lecture_du_plancher_de_politique() -> None:
     """`MinSetOfChars` est un mot-clé, jamais un entier : c'est la forme que rend le boîtier."""
     donnees = {"MinLength": "12", "MinSetOfChars": "AlphaNum", "MinEntropy": "40"}
