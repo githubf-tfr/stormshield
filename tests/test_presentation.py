@@ -1,9 +1,9 @@
 """Logique de présentation, testée sans widget.
 
-`tkinter` peut être absent de la machine de test comme du runner d'intégration
-continue : aucun test n'importe `stormshield_utilisateurs.fenetre`, qui est le seul
-module du paquet à importer `tkinter`. Tout ce qui est vérifiable l'est ici ; la
-fenêtre elle-même relève du cahier de recette.
+Ce fichier n'importe ni `tkinter` ni `stormshield_utilisateurs.fenetre`, et n'a besoin
+d'aucun affichage : la logique de l'interface se prouve ici, entièrement, sur une
+machine où `tkinter` n'est même pas installé. La fenêtre, elle, a sa propre suite —
+`test_fenetre.py`, qui exige un affichage et se saute sans lui.
 """
 
 import ast
@@ -1550,10 +1550,12 @@ def test_une_creation_d_annuaire_refusee_remonte_le_refus() -> None:
 
 # --- garde-fous de structure ----------------------------------------------
 #
-# Ces tests lisent des fichiers source sans les importer : `fenetre.py` importe
-# `tkinter`, qui peut être absent de la machine. Ils vérifient des propriétés que
-# l'exécution ne montrerait qu'en recette, sur un boîtier, un jour de coupure réseau —
-# et les derniers sabotent des sources factices pour prouver qu'ils mordent.
+# Ces tests lisent des fichiers source sans les importer, et le font exprès : ils
+# vérifient des propriétés de structure, vraies ou fausses avant toute exécution, que
+# l'exécution ne montrerait qu'en recette — sur un boîtier, un jour de coupure réseau.
+# Les lire au lieu de les importer les garde valables là où `tkinter` n'est pas
+# installé, et indépendants de ce que `test_fenetre.py` arrive à exécuter. Les derniers
+# sabotent des sources factices pour prouver qu'ils mordent.
 
 
 def _arbre(module_source: str) -> ast.Module:
@@ -1571,10 +1573,14 @@ def _modules_importes(arbre: ast.Module) -> list[str]:
 
 
 def test_le_module_de_presentation_n_importe_pas_tkinter() -> None:
-    """Garde-fou : la logique testable doit rester importable là où `tkinter` est absent.
+    """Garde-fou d'architecture : la logique de l'interface reste prouvable sans widget.
 
-    Le jour où un raccourci ferait remonter un widget ici, toute la suite deviendrait
-    incollectable sur le runner d'intégration continue — ce test le dit avant.
+    Cette règle ne dépend d'aucune machine : elle tiendrait même si `tkinter` était
+    installé partout. Ce qu'elle protège, c'est la frontière — tout ce qui décide vit
+    ici et se teste sans affichage, sans fenêtre à construire et sans boîte modale à
+    contourner ; `fenetre.py` ne fait que câbler. Le jour où un raccourci ferait
+    remonter un widget ici, la moitié de ces mille huit cents lignes de test
+    exigeraient un serveur X pour dire la même chose.
     """
     importes = _modules_importes(_arbre(presentation.__file__))
     assert [nom for nom in importes if nom.partition(".")[0] == "tkinter"] == []

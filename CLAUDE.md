@@ -20,4 +20,7 @@ LDAP interne, blacklists (groupes d'objets réseau/URL), depuis des fichiers pla
 - Unitaires : `pytest`, aucun firewall requis. Tout appel réseau passe par une dépendance
   injectable.
 - Ce qui exige un boîtier joignable porte le marqueur `firewall`, exclu par défaut.
+- `tests/test_fenetre.py` construit la vraie fenêtre : exige `python3-tk` **et** un
+  affichage. Lancer la suite sous **`xvfb-run -a pytest`** ; sans affichage ce fichier se
+  saute, `pytest` nu reste vert et ne prouve donc rien de l'interface.
 - Analyse statique avant tout commit : `ruff check .` puis `mypy`.
