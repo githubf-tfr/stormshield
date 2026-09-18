@@ -38,18 +38,63 @@ jobs:
         # renommé, sorti de `testpaths`, cassé à l'import — ne saute rien et laisse l'étape
         # verte. D'où le plancher : il se relève quand il devient absurdement bas, jamais
         # dans le même commit qu'une suppression de tests.
+        #
+        # `set +e` explicite : sous `bash -e`, l'affectation `resultat=$(pytest …)` mourait
+        # silencieusement dès que pytest sortait en non-zéro, avant le premier `echo` — les
+        # trois garde-fous ci-dessous ne parlaient jamais. `ECHEC` porte le verdict, les
+        # commandes de diagnostic ne tuent plus le script.
         run: |
+          set +e
           PLANCHER=480
-          resultat=$(xvfb-run -a pytest -m "not firewall" -q --no-header)
+          ECHEC=0
+
+          echo "::notice::Python : $(python3 --version 2>&1)"
+          info_tcltk=$(python3 -c 'import tkinter; print(f"Tcl {tkinter.TclVersion} / Tk {tkinter.TkVersion}")' 2>&1)
+          echo "::notice::Tcl/Tk : ${info_tcltk}"
+          collecte=$(xvfb-run -a pytest -m "not firewall" --collect-only -q 2>&1)
+          echo "::notice::Collecte : $(printf '%s\n' "$collecte" | tail -3 | tr '\n' ' ')"
+
+          resultat=$(xvfb-run -a pytest -m "not firewall" -q --no-header 2>&1)
+          code=$?
           echo "$resultat"
+
           case "$resultat" in
             *skipped*)
               echo "::error::des tests ont été sautés : xvfb ou tkinter manque sur ce runner"
-              exit 1
+              ECHEC=1
               ;;
           esac
+
           passes=$(printf '%s\n' "$resultat" | grep -oE '[0-9]+ passed' | tail -1 | cut -d' ' -f1)
           if [ -z "$passes" ] || [ "$passes" -lt "$PLANCHER" ]; then
             echo "::error::${passes:-0} tests passés, plancher $PLANCHER : un fichier entier a-t-il cessé d'être collecté ?"
-            exit 1
+            ECHEC=1
           fi
+
+          if [ "$code" -ne 0 ]; then
+            # Une annotation `::error::` s'arrête à la première fin de ligne réelle :
+            # tout saut à la ligne doit passer en `%0A` pour rester dans le même
+            # message, sans quoi seule sa première ligne apparaît — ce qui nous a
+            # trompés une fois déjà.
+            encoder() { awk 'BEGIN{ORS="%0A"} {print}' | sed 's/%0A$//'; }
+
+            noms=$(printf '%s\n' "$resultat" | grep -E '^(FAILED|ERROR) ' | tr '\n' ' | ')
+            resume=$(printf '%s\n' "$resultat" | sed -n '/short test summary info/,$p' | head -20 | encoder)
+            echo "::error::pytest a échoué (code ${code}) : ${noms:-voir le journal ci-dessus}"
+            if [ -n "$resume" ]; then
+              echo "::error::${resume}"
+            fi
+            # Le corps du rapport d'échec — entre « FAILURES » et le résumé court —
+            # porte le contexte de l'assertion et, si un fil d'exécution a écrit sur
+            # stderr pendant le test (un fil qui lève une exception hors des cas
+            # attrapés dans `executer()` ne le fait jamais autrement), la section
+            # « Captured stderr call » qui le montre. Sans ce bloc, un `_tourner` qui
+            # expire en silence après vingt secondes ne nomme aucune cause.
+            detail=$(printf '%s\n' "$resultat" | awk '/^=+ FAILURES =+$/{f=1;next} /^=+ short test summary info =+$/{f=0} f' | head -100 | encoder)
+            if [ -n "$detail" ]; then
+              echo "::error::${detail}"
+            fi
+            ECHEC=1
+          fi
+
+          exit "$ECHEC"

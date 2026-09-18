@@ -18,6 +18,7 @@ défauts de `Dialogues` qui appellent vraiment `messagebox`/`filedialog`, et la 
 """
 
 import contextlib
+import gc
 import queue
 import threading
 import time
@@ -193,6 +194,14 @@ def _fenetre_ouverte(
         # Déjà détruite par le test lui-même dans tout ce qui éprouve la fermeture.
         with contextlib.suppress(tk.TclError):
             fenetre.racine.destroy()
+        # `destroy()` ne rompt pas le cycle qui retient les `tkinter.Variable` de la
+        # fenêtre (var_longueur, etc.) : sans collecte immédiate, elles ne meurent
+        # qu'au prochain passage du GC cyclique — n'importe quand, sur n'importe quel
+        # fil. Leur `__del__` interroge alors le Tcl d'une racine déjà détruite ; s'il
+        # tombe sur le fil d'un lot d'un test suivant plutôt que sur le fil principal,
+        # l'appel qui en résulte peut bloquer ce fil (constaté sous Python 3.12,
+        # jamais reproduit isolément — la coïncidence dépend du fil où le GC déclenche).
+        gc.collect()
 
 
 def _retenir(boitier: BoitierMemoire, operation_retenue: str) -> threading.Event:
