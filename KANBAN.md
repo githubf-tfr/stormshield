@@ -219,8 +219,9 @@ Modules livrés, du plus pur au plus impur :
 | `fenetre` | Seul module à importer `tkinter`. Testé sous `xvfb-run` depuis le 2026-09-18 |
 | `__main__` | Point d'entrée, cible de PyInstaller, filet de démarrage |
 
-- **273 tests** passent (marqueur `firewall` exclu), `ruff` et `mypy` verts, aucun
-  `# type: ignore`.
+- **505 tests** passent sous `xvfb-run` (marqueur `firewall` exclu), `ruff` et `mypy`
+  verts, aucun `# type: ignore`. Ce compte est celui du produit entier, v2 comprise ; il
+  était de 273 à la livraison de la v1.
 - Workflows : `qualite.yml` (`ruff`, `mypy`, `pytest` en matrice 3.11 / 3.12) et `exe.yml`
   (PyInstaller `--onefile --windowed` sur `windows-latest`, release sur tag `v*`).
 - `README.md` refondu pour l'opérateur : format du CSV, simulation, mots de passe,
