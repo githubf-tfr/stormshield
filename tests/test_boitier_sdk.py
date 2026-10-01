@@ -96,6 +96,36 @@ def test_nom_compose_reste_un_seul_jeton() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "domaine",
+    [
+        r"interne.lan > C:\Users\op\Startup\maj.exe",
+        r"interne.lan < C:\Users\op\secrets.txt",
+        'interne.lan"',
+        "interne.lan autre",
+        "interne.lan\n",
+    ],
+)
+def test_un_domaine_hors_jeu_de_caracteres_ne_part_pas(domaine: str) -> None:
+    """Le domaine est le seul jeton que la commande recolle nu en dernier : un `>` y fait
+    traiter la fin de la commande comme un chemin local par `SSLClient.send_command`, qui
+    l'ouvre en écriture. Aucune de ces valeurs ne doit donner une commande."""
+    with pytest.raises(ErreurFatale):
+        commande_creer_utilisateur("dupont", "Dupont", "Marie", domaine)
+
+
+def test_l_adaptateur_refuse_un_domaine_hors_jeu_de_caracteres() -> None:
+    """Le refus tombe dès la frontière, sur la réponse à `CONFIG LDAP LIST` : rien du
+    boîtier n'entre dans l'outil sans avoir été vérifié. La valeur est citée parce que
+    c'est ainsi qu'une réponse SNS porte un champ à blancs — le boîtier choisit sa
+    réponse, guillemets compris."""
+    client = _ClientFactice(
+        reponse=_reponse_section_line("Result", [r'domain="interne.lan > C:\tmp\maj.exe"'])
+    )
+    with pytest.raises(ErreurFatale):
+        _adaptateur(client).lister_annuaires()
+
+
 def test_nom_de_groupe_transmis_verbatim_entre_guillemets() -> None:
     assert commande_creer_groupe("compta bis") == 'USER GROUP CREATE "compta bis"'
 

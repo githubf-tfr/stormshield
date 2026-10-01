@@ -104,13 +104,54 @@ def _entre_guillemets(valeur: str) -> str:
     return f'"{valeur}"'
 
 
+# Le domaine est la seule valeur venue du boîtier que l'outil recolle **nue et en fin** de
+# commande. « Relue du boîtier » n'est pas un gage de confiance, c'est l'inverse : un boîtier
+# compromis, un hôte usurpé ou une session interceptée (case « Vérifier le certificat »
+# décochée) choisit librement ce que rend `CONFIG LDAP LIST`. Or `SSLClient.send_command`
+# applique `^(?P<cmd>.+?)\s*[<>]\s*(?!.*")(?P<file>.*?)$` à la commande entière : ce qui suit
+# un `>` devient un **chemin local** que `download()` ouvre en écriture, et ce qui suit un
+# `<` un fichier local téléversé vers le boîtier. Un annuaire nommé
+# `interne.lan > ...\Startup\maj.exe` faisait donc écrire sur le poste d'administration le
+# corps de la réponse du boîtier, l'outil n'y voyant qu'une liaison perdue.
+#
+# Le jeu autorisé est celui d'un nom de domaine, et il exclut par construction les cinq
+# caractères qui comptent ici — `<`, `>`, le guillemet, le blanc, le saut de ligne : la
+# redirection de fichier du SDK, que ce produit ne veut jamais, devient inatteignable.
+# `\Z` et non `$`, qui accepterait un saut de ligne final.
+#
+# Les autres valeurs rendues par le boîtier (noms de groupes de `USER GROUP LIST`) ne
+# figurent que dans des commandes terminées par un guillemet, lequel fait échouer le garde
+# `(?!.*")` du motif : le SDK n'y découpe rien.
+_MOTIF_DOMAINE = re.compile(r"^[A-Za-z0-9._-]+\Z")
+
+
+def _domaine_verifie(domaine: str) -> str:
+    """Le domaine tel quel s'il tient dans le jeu autorisé, sinon on lève.
+
+    `ErreurFatale` et non `ErreurCommande` : la valeur ne vient pas du lot mais du boîtier,
+    une reconnexion rendrait exactement la même, et le lot doit s'arrêter avant d'émettre une
+    commande que le SDK découperait. Rendre un domaine amputé de ses caractères interdits
+    serait pire encore : l'outil créerait les comptes dans un domaine qu'il a inventé.
+    """
+    if _MOTIF_DOMAINE.match(domaine) is None:
+        raise ErreurFatale(
+            f"le domaine « {domaine} » sort du jeu de caractères attendu pour un nom de "
+            "domaine (lettres, chiffres, point, tiret, souligné) : l'outil s'arrête plutôt "
+            "que d'émettre une commande que le SDK découperait en accès à un fichier local."
+        )
+    return domaine
+
+
 def commande_creer_utilisateur(identifiant: str, nom: str, prenom: str, domaine: str) -> str:
     """`uid` et `domainname` partent nus : l'identifiant est contraint en amont à
-    `^[a-z0-9._-]+$`, et le domaine est relu du boîtier lui-même."""
+    `^[a-z0-9._-]+$`, et le domaine — relu du boîtier, donc non fiable — est revérifié ici.
+    Le garde est répété au recollage et pas laissé au seul appelant : c'est ici que la
+    commande devient dangereuse, et une protection qui repose sur la discipline de l'appelant
+    n'en est pas une."""
     morceaux = [f"USER CREATE uid={identifiant}", f"name={_entre_guillemets(nom)}"]
     if prenom:
         morceaux.append(f"gname={_entre_guillemets(prenom)}")
-    morceaux.append(f"domainname={domaine}")
+    morceaux.append(f"domainname={_domaine_verifie(domaine)}")
     return " ".join(morceaux)
 
 
@@ -365,8 +406,14 @@ class BoitierSDK:
         # À confirmer sur boîtier (cahier de recette) : `CONFIG LDAP LIST` liste aussi les
         # annuaires externes, qu'aucun filtre ne distingue ici alors que le Protocol parle
         # d'annuaires internes. La clé `domain` est elle-même une supposition.
+        # Le domaine est contraint dès la frontière : une valeur du boîtier n'entre pas dans
+        # l'outil sans être vérifiée, et le refus tombe avant la moindre écriture.
         reponse = self._envoyer("CONFIG LDAP LIST")
-        return [str(ligne["domain"]) for ligne in _lignes(reponse) if ligne.get("domain")]
+        return [
+            _domaine_verifie(str(ligne["domain"]))
+            for ligne in _lignes(reponse)
+            if ligne.get("domain")
+        ]
 
     def initialiser_annuaire(
         self, domainname: str, organisation: str, dc: str, mot_de_passe: str
