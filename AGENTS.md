@@ -1,6 +1,6 @@
-# CLAUDE.md — stormshield
+# AGENTS.md — stormshield
 
-**Feuille.** Aucun projet en dessous : ne lis pas le `README.md` au démarrage.
+**Feuille.** Ne lis pas le `README.md` au démarrage.
 
 Outillage Python d'injection en lot sur firewall Stormshield SNS : utilisateurs de la base
 LDAP interne, blacklists (groupes d'objets réseau/URL), depuis des fichiers plats.
