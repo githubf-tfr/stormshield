@@ -18,7 +18,7 @@ que soit leur casse, et l'ajout des adhésions de groupe qui leur manquent.
 
 L'injection de blacklists reste à faire. L'avancement se lit dans
 [`KANBAN.md`](./KANBAN.md), les conventions pour qui modifie dans
-[`CLAUDE.md`](./CLAUDE.md).
+[`AGENTS.md`](./AGENTS.md).
 
 ## Installation
 
@@ -199,5 +199,5 @@ Le `.exe` se construit **uniquement** par le workflow
 PyInstaller ne produit un binaire Windows que sous Windows, et le poste de développement est
 sous Linux.
 
-Conventions et invariants : [`CLAUDE.md`](./CLAUDE.md). Spécification et plan :
+Conventions et invariants : [`AGENTS.md`](./AGENTS.md). Spécification et plan :
 [`docs/superpowers/`](./docs/superpowers/).
