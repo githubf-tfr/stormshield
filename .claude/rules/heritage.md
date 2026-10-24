@@ -1,5 +1,5 @@
 <!-- Généré par githubf-tfr/claude (propagation). Ne pas éditer : écrasé au prochain passage. -->
-> Règles héritées des chapeaux, dans l'ordre. Sources : githubf-tfr/claude@72f4d84. En cas de contradiction, l'`AGENTS.md` de ce repo gagne.
+> Règles héritées des chapeaux, dans l'ordre. Sources : githubf-tfr/claude@1e6a7b4. En cas de contradiction, l'`AGENTS.md` de ce repo gagne.
 
 # AGENTS.md — claude (chapeau des projets `~/Git`)
 
@@ -77,7 +77,7 @@ injectable à défaut de production. Ce qui exige un privilège est isolé derri
 
 **2. Analyse statique.** Chaque repo déclare sa commande et elle passe **avant tout commit** :
 `ruff` + `mypy`, `ansible-lint`, l'équivalent ailleurs.
-Repo `claude` : `uv tool run ruff check propagation migration && uv tool run ruff format --check propagation migration && uv tool run mypy --strict propagation migration`.
+Repo `claude` : `uv tool run ruff check propagation && uv tool run ruff format --check propagation && uv tool run mypy --strict propagation`.
 
 **3. Cahier de recette.** Fonctionnel. **Couvre tous les cas d'usage, y compris ceux déjà
 couverts en unitaire** : l'un prouve que le code fait ce qu'on a écrit, l'autre que le produit
@@ -121,8 +121,7 @@ Quand un mot désigne deux choses, le repo tient une section « Vocabulaire » e
 - **Ticket d'ordre** : d'un chapeau vers un repo qu'il domine, seulement s'il ne peut pas agir
   (secret chiffré, remote injoignable). Titre en `[ordre]`, commande exacte dans le corps.
 - **Toute session lit les tickets ouverts du repo** ; un `[ordre]` non résolu passe avant.
-- **Ne touche à aucun repo autre que celui visé par la tâche** — l'accès en écriture à d'autres
-  repos est une limitation technique, pas une autorisation. Vérifie le chemin absolu avant d'écrire.
+- **Ne touche à aucun repo autre que celui visé par la tâche** — accès en écriture ≠ autorisation. Vérifie le chemin absolu avant d'écrire.
 
 ## Style de travail
 
