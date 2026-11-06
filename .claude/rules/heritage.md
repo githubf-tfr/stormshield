@@ -1,5 +1,5 @@
 <!-- Généré par githubf-tfr/claude (propagation). Ne pas éditer : écrasé au prochain passage. -->
-> Règles héritées des chapeaux, dans l'ordre. Sources : githubf-tfr/claude@1e6a7b4. En cas de contradiction, l'`AGENTS.md` de ce repo gagne.
+> Règles héritées des chapeaux, dans l'ordre. Sources : githubf-tfr/claude@abbc954. En cas de contradiction, l'`AGENTS.md` de ce repo gagne.
 
 # AGENTS.md — claude (chapeau des projets `~/Git`)
 
@@ -31,8 +31,9 @@ seule règle : **jamais « terminé » sans avoir exécuté les commandes et lu 
 **Routage.** Greffons de production (`brainstorming`, `writing-plans`,
 `test-driven-development`, `executing-plans`) : en sous-agent, jamais en session principale —
 un dispatch = un rôle = un greffon. La principale cadre, conteste le livrable, arbitre ; ne
-produit pas. Exception : `subagent-driven-development` et `dispatching-parallel-agents` *sont*
-le pilotage. `<SUBAGENT-STOP>` : le prompt de dispatch nomme le greffon, le sous-agent n'invoque rien seul.
+produit pas. Exceptions : `subagent-driven-development` et `dispatching-parallel-agents` *sont*
+le pilotage ; en chapeau, le `brainstorming` d'un nouveau repo se fait en principale, avec
+l'utilisateur, sans plafond de questions. `<SUBAGENT-STOP>` : le prompt de dispatch nomme le greffon, le sous-agent n'invoque rien seul.
 
 | Artefact | Emplacement | Versionné |
 |---|---|---|
