@@ -1,5 +1,5 @@
 <!-- Généré par githubf-tfr/claude (propagation). Ne pas éditer : écrasé au prochain passage. -->
-> Règles héritées des chapeaux, dans l'ordre. Sources : githubf-tfr/claude@abbc954. En cas de contradiction, l'`AGENTS.md` de ce repo gagne.
+> Règles héritées des chapeaux, dans l'ordre. Sources : githubf-tfr/claude@897118b. En cas de contradiction, l'`AGENTS.md` de ce repo gagne.
 
 # AGENTS.md — claude (chapeau des projets `~/Git`)
 
@@ -25,15 +25,20 @@ Un `AGENTS.md` de chapeau est lu hors de son repo : citer tout autre fichier en 
 ## Méthode : superpowers
 
 **Obligatoire pour tout dev au sens large** — code, Ansible, Docker/Compose, scripts, IaC ;
-aucune consigne utilisateur requise. Autres tâches complexes : à proposer. Hors greffon, une
-seule règle : **jamais « terminé » sans avoir exécuté les commandes et lu leur sortie.**
+aucune consigne utilisateur requise. Autres tâches complexes : à proposer. Toujours :
+**jamais « terminé » sans avoir exécuté les commandes et lu leur sortie.**
 
-**Routage.** Greffons de production (`brainstorming`, `writing-plans`,
-`test-driven-development`, `executing-plans`) : en sous-agent, jamais en session principale —
-un dispatch = un rôle = un greffon. La principale cadre, conteste le livrable, arbitre ; ne
-produit pas. Exceptions : `subagent-driven-development` et `dispatching-parallel-agents` *sont*
-le pilotage ; en chapeau, le `brainstorming` d'un nouveau repo se fait en principale, avec
-l'utilisateur, sans plafond de questions. `<SUBAGENT-STOP>` : le prompt de dispatch nomme le greffon, le sous-agent n'invoque rien seul.
+**Routage.** Session principale en Opus.
+- *Fonctionnalité ou multi-fichiers* : `brainstorming`, spec, `writing-plans` en principale,
+  avec l'utilisateur ; en chapeau, sans plafond de questions pour un nouveau repo. Puis
+  exécution par `subagent-driven-development`.
+- *Changement mineur* : fichiers déjà en contexte et quelques lignes → en principale ;
+  sinon → un sous-agent direct (`test-driven-development`), sans spec ni plan.
+- Un dispatch = un rôle = un greffon. `<SUBAGENT-STOP>` : le prompt de dispatch nomme le
+  greffon, le sous-agent n'invoque rien seul.
+
+**Contexte.** Après chaque livrable écrit sur disque (spec, plan, commit), demande
+`/compact` à l'utilisateur ; `/clear` si la tâche suivante est sans lien.
 
 | Artefact | Emplacement | Versionné |
 |---|---|---|
@@ -42,17 +47,12 @@ l'utilisateur, sans plafond de questions. `<SUBAGENT-STOP>` : le prompt de dispa
 
 Un plan achevé se fond dans la doc pérenne, puis se supprime.
 
-## Consigne temporaire — abonnement max
-
-Hors méthode, ne se combine avec rien d'autre. À supprimer quand l'abonnement retombe.
-**Parallélise au maximum** : dispatchs sans dépendance émis dans la même réponse (appels
-simultanés), jamais l'un après l'autre.
-
 ## Délégation
 
 Sous-agent natif de l'agent choisi, aucun outil tiers. **Chaque dispatch fixe `model`** :
-le moins cher qui tient le rôle (barème § *Model Selection* de `subagent-driven-development`),
-sans hériter du modèle de session.
+le moins cher qui tient le rôle, Sonnet par défaut (barème § *Model Selection* de
+`subagent-driven-development`), sans hériter du modèle de session. **Un dispatch à la fois** :
+le délai ne compte pas, le parallélisme ne fait que dupliquer l'exploration.
 
 ## Documentation : trois rôles
 
@@ -133,11 +133,3 @@ Quand un mot désigne deux choses, le repo tient une section « Vocabulaire » e
 - **Proposer avant de faire** : au-delà de 5 lignes, montrer le diff.
 - **Strict minimum de code**, **rien qui n'ait été demandé**.
 - **Ne re-tranche pas une décision prise**, ne généralise pas une décision ponctuelle.
-- **Caveman `full` obligatoire** : coupe articles, remplissage, politesses et hésitations ;
-  fragments permis, mots courts, termes techniques exacts. Préserve toute substance technique.
-  Forme : fait, action, raison, prochaine étape. Code inchangé.
-- Niveaux : `/caveman lite|full|ultra|wenyan`. Ne change de niveau ou ne désactive que sur
-  consigne explicite de l'utilisateur (`stop caveman` ou `normal mode`).
-- Reviens au style clair pour les avertissements de sécurité, les actions irréversibles ou
-  si l'utilisateur ne comprend pas ; reprends ensuite Caveman.
-- Code, commits et PRs : style normal.
